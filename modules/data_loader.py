@@ -111,37 +111,124 @@ def _merge_financial_statements(
     yf_df: pd.DataFrame,
     dart_df: pd.DataFrame,
     prefer: str = "dart",
+    date_tolerance_days: int = 15,
 ) -> pd.DataFrame:
     """
-    yfinance와 DART의 동일 항목 DataFrame을 병합.
+    yfinance + DART 재무제표를 똑똑하게 병합.
 
-    한국 종목의 경우 DART가 더 정확하므로 prefer="dart" (기본).
-    DART에 없는 항목은 yfinance 값 유지.
+    개선 사항 (v2):
+    1. 분기 날짜 매칭: ±15일 이내면 같은 분기로 인식
+       (DART가 분기말 30일, yfinance가 31일 같은 경우 같은 분기로 처리)
+    2. 컬럼 통합: 같은 분기는 하나의 컬럼으로 합침 (분기 수가 두 배 되는 문제 해결)
+    3. NaN 채우기: 한 소스에 값이 없으면 다른 소스 값으로 자동 fill
+    4. 우선순위: prefer="dart"면 한국 종목에서 DART 값 우선 (더 정확)
 
-    행 = 항목명, 열 = 날짜.
+    행 = 항목명, 열 = 분기말 날짜 (최신 → 과거 순)
     """
+    # Empty handling
     if yf_df is None or yf_df.empty:
-        return dart_df if dart_df is not None else pd.DataFrame()
+        return dart_df.copy() if dart_df is not None and not dart_df.empty else pd.DataFrame()
     if dart_df is None or dart_df.empty:
-        return yf_df
+        return yf_df.copy()
 
-    if prefer == "dart":
-        # DART를 베이스로, yfinance는 DART에 없는 행만 추가
-        merged = dart_df.copy()
-        for row_idx in yf_df.index:
-            if row_idx not in merged.index:
-                # 컬럼이 다르면 reindex
-                yf_row = yf_df.loc[[row_idx]].reindex(columns=merged.columns)
-                merged = pd.concat([merged, yf_row])
-        return merged
-    else:
-        # yfinance 우선
-        merged = yf_df.copy()
-        for row_idx in dart_df.index:
-            if row_idx not in merged.index:
-                dart_row = dart_df.loc[[row_idx]].reindex(columns=merged.columns)
-                merged = pd.concat([merged, dart_row])
-        return merged
+    # 1. 우선/보조 소스 결정
+    primary_df = dart_df if prefer == "dart" else yf_df
+    secondary_df = yf_df if prefer == "dart" else dart_df
+
+    primary_cols = list(primary_df.columns)
+    secondary_cols = list(secondary_df.columns)
+
+    # 2. 컬럼 매칭: 각 primary 컬럼에 대해 가장 가까운 secondary 컬럼 찾기
+    tolerance = pd.Timedelta(days=date_tolerance_days)
+    column_mapping: dict = {}  # primary_col → secondary_col (없으면 None)
+    used_secondary = set()
+
+    for p_col in primary_cols:
+        try:
+            p_ts = pd.Timestamp(p_col)
+        except (TypeError, ValueError):
+            column_mapping[p_col] = None
+            continue
+
+        best_match = None
+        best_diff = tolerance
+        for s_col in secondary_cols:
+            if s_col in used_secondary:
+                continue
+            try:
+                s_ts = pd.Timestamp(s_col)
+            except (TypeError, ValueError):
+                continue
+            diff = abs(p_ts - s_ts)
+            if diff <= best_diff:
+                best_match = s_col
+                best_diff = diff
+
+        column_mapping[p_col] = best_match
+        if best_match is not None:
+            used_secondary.add(best_match)
+
+    # 3. 매칭 안 된 secondary 컬럼 (한쪽 소스에만 있는 분기)
+    unmatched_secondary = [c for c in secondary_cols if c not in used_secondary]
+
+    # 4. 최종 컬럼: primary 컬럼 + 매칭 안 된 secondary 컬럼, 최신순 정렬
+    all_columns = list(primary_cols) + unmatched_secondary
+
+    def _sort_key(c):
+        try:
+            return pd.Timestamp(c)
+        except (TypeError, ValueError):
+            return pd.Timestamp("1900-01-01")
+
+    all_columns = sorted(set(all_columns), key=_sort_key, reverse=True)
+
+    # 5. 모든 행(항목) 수집 — 양쪽 union
+    all_rows = list(dict.fromkeys(list(primary_df.index) + list(secondary_df.index)))
+
+    # 6. 결과 DataFrame 빌드
+    merged = pd.DataFrame(index=all_rows, columns=all_columns, dtype=float)
+
+    # 6-1. primary 값 채우기
+    for p_col in primary_cols:
+        if p_col not in merged.columns:
+            continue
+        for row in primary_df.index:
+            try:
+                val = primary_df.at[row, p_col]
+                if pd.notna(val):
+                    merged.at[row, p_col] = float(val)
+            except (KeyError, ValueError, TypeError):
+                pass
+
+    # 6-2. secondary로 NaN 채우기 (매칭된 컬럼)
+    for primary_col, secondary_col in column_mapping.items():
+        if secondary_col is None or primary_col not in merged.columns:
+            continue
+        for row in secondary_df.index:
+            if row not in merged.index:
+                continue
+            try:
+                # primary가 NaN인 경우에만 secondary 값 사용
+                if pd.isna(merged.at[row, primary_col]):
+                    val = secondary_df.at[row, secondary_col]
+                    if pd.notna(val):
+                        merged.at[row, primary_col] = float(val)
+            except (KeyError, ValueError, TypeError):
+                pass
+
+    # 6-3. 매칭 안 된 secondary 컬럼 — 그대로 추가
+    for s_col in unmatched_secondary:
+        if s_col not in merged.columns:
+            continue
+        for row in secondary_df.index:
+            try:
+                val = secondary_df.at[row, s_col]
+                if pd.notna(val):
+                    merged.at[row, s_col] = float(val)
+            except (KeyError, ValueError, TypeError):
+                pass
+
+    return merged
 
 
 # ============================================================
@@ -276,6 +363,25 @@ def load_company_data(
     sector_internal = classify_sector(ticker, yf_sector, yf_industry)
     name = info.get("longName") or info.get("shortName") or ticker
 
+    # 시총 계산: 보통주 기준 (가격 × 발행주식수)
+    # yfinance의 marketCap은 한국 종목에서 우선주 포함 등으로 부정확할 때가 있음
+    # (예: 삼성전자 yfinance marketCap = 2,291조 / 실제 보통주 시총 = 2,011조)
+    # → 직접 계산 가능하면 그 값을 사용. 미국 종목은 두 값이 거의 일치.
+    yf_market_cap = info.get("marketCap")
+    current_price = info.get("currentPrice") or info.get("regularMarketPrice")
+    shares = info.get("sharesOutstanding")
+
+    if current_price and shares:
+        calculated_market_cap = float(current_price) * float(shares)
+        market_cap = calculated_market_cap
+        market_cap_source = "calculated (price × shares)"
+    elif yf_market_cap:
+        market_cap = float(yf_market_cap)
+        market_cap_source = "yfinance.marketCap (fallback)"
+    else:
+        market_cap = None
+        market_cap_source = "unavailable"
+
     meta = {
         "ticker": ticker,
         "name": name,
@@ -284,7 +390,8 @@ def load_company_data(
         "sector_yf": yf_sector,
         "industry_yf": yf_industry,
         "sector_internal": sector_internal,
-        "market_cap": info.get("marketCap"),
+        "market_cap": market_cap,
+        "market_cap_source": market_cap_source,
         "exchange": info.get("exchange"),
         "fetched_at": datetime.now().isoformat(),
     }
