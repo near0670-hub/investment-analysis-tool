@@ -1,0 +1,28 @@
+# Core
+streamlit>=1.30.0
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Data sources - 미국
+yfinance>=0.2.40
+fredapi>=0.5.1              # 매크로 (금리, 환율)
+
+# Data sources - 한국 (MVP부터 포함)
+OpenDartReader>=0.2.2       # DART 공시/재무
+pykrx>=1.0.45               # 한국거래소 (외국인/기관/공매도)
+
+# Visualization
+plotly>=5.18.0
+
+# Utilities
+python-dateutil>=2.8.2
+requests>=2.31.0
+pytz>=2024.1
+beautifulsoup4>=4.12.0      # DART HTML 파싱 보조
+lxml>=5.0.0
+
+# Phase 2 (주석 처리 - 필요 시 활성화)
+# sec-edgar-downloader>=5.0   # 미국 SEC 공시
+
+# Phase 3 (LLM)
+# anthropic>=0.39.0
