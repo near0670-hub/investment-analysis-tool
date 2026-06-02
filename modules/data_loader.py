@@ -291,6 +291,7 @@ def load_company_data(
     # ============================================================
     dart_data = {}
     pykrx_data = {}
+    naver_data = None
 
     if country == "KR":
         if use_dart:
@@ -318,6 +319,25 @@ def load_company_data(
             except Exception as e:
                 if verbose:
                     print(f"  [pykrx error] {e}")
+
+        # 네이버 컨센서스 (한국 종목 미래 추정치 보강)
+        # ⚠️ 실패해도 앱 안 죽음 (graceful degradation)
+        try:
+            from modules.data_sources.naver_source import fetch_naver_consensus
+            ticker_6digit = ticker.replace(".KS", "").replace(".KQ", "")
+            naver_data = fetch_naver_consensus(ticker_6digit)
+            if naver_data is not None:
+                sources_used.append("naver")
+                if verbose:
+                    print(f"  [naver] consensus fetched: "
+                          f"{len(naver_data.get('quarterly', pd.DataFrame()).columns)}q, "
+                          f"{len(naver_data.get('annual', pd.DataFrame()).columns)}y")
+            elif verbose:
+                print(f"  [naver] no consensus data")
+        except Exception as e:
+            naver_data = None
+            if verbose:
+                print(f"  [naver error, gracefully skipped] {e}")
 
     # ============================================================
     # 5. 재무제표 병합 (한국 종목은 DART 우선)
@@ -431,6 +451,7 @@ def load_company_data(
         "kr_investor_flow":   pykrx_data.get("investor_flow", pd.DataFrame()),
         "kr_short_selling":   pykrx_data.get("short_selling", pd.DataFrame()),
         "kr_foreign_holding": pykrx_data.get("foreign_holding", pd.DataFrame()),
+        "kr_naver_consensus": naver_data,  # 네이버 컨센서스 (None 가능)
 
         "data_quality": data_quality,
         "data_sources": sources_used,
