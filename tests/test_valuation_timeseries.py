@@ -268,6 +268,128 @@ def test_thresholds_exposed():
 
 
 # ============================================================
+# Test 5b: 미국 종목 시계열 역산 (Phase 3.5)
+# ============================================================
+def test_us_timeseries_reconstruction():
+    """
+    미국 종목: yfinance 데이터로 PER 시계열 역산.
+    
+    Scenario:
+    - FY22: EPS 5.0, avg price 100 → PER 20x
+    - FY23: EPS 6.0, avg price 120 → PER 20x
+    - FY24: EPS 8.0, avg price 200 → PER 25x
+    - FY25: EPS 10.0, avg price 250 → PER 25x
+    - Forward: forwardEps 15, currentPrice 300 → PER 20x
+    """
+    # 가짜 income_annual: Diluted EPS
+    eps_cols = [pd.Timestamp(f"{2022+i}-12-31") for i in range(4)]
+    income_annual = pd.DataFrame(
+        index=["Diluted EPS"],
+        columns=eps_cols,
+        data=[[5.0, 6.0, 8.0, 10.0]],
+    )
+
+    # 가짜 balance_annual: equity
+    balance_annual = pd.DataFrame(
+        index=["Stockholders Equity"],
+        columns=eps_cols,
+        data=[[10e9, 12e9, 14e9, 16e9]],
+    )
+
+    # 가짜 price history: 일별, 연간 평균이 100/120/200/250 이 되도록
+    import numpy as np
+    dates_2022 = pd.date_range("2022-01-01", "2022-12-31", freq="D")
+    dates_2023 = pd.date_range("2023-01-01", "2023-12-31", freq="D")
+    dates_2024 = pd.date_range("2024-01-01", "2024-12-31", freq="D")
+    dates_2025 = pd.date_range("2025-01-01", "2025-12-31", freq="D")
+
+    all_dates = list(dates_2022) + list(dates_2023) + list(dates_2024) + list(dates_2025)
+    close_prices = ([100.0] * len(dates_2022) + [120.0] * len(dates_2023)
+                    + [200.0] * len(dates_2024) + [250.0] * len(dates_2025))
+
+    price_history = pd.DataFrame(
+        {"Close": close_prices},
+        index=pd.DatetimeIndex(all_dates),
+    )
+
+    data = {
+        "meta": {"country": "US"},
+        "info": {
+            "sharesOutstanding": 1e9,
+            "forwardEps": 15.0,
+            "currentPrice": 300.0,
+        },
+        "income_annual": income_annual,
+        "balance_annual": balance_annual,
+        "price": price_history,
+    }
+
+    result = calculate_valuation_timeseries(data, n_history=4)
+    assert result is not None, "결과 None"
+    assert result["country"] == "US"
+
+    df = result["components"]
+    print(f"  Computed time series ({len(df)} rows):")
+    for _, row in df.iterrows():
+        per_str = f"{row['per']:.1f}x" if row['per'] is not None else "—"
+        pbr_str = f"{row['pbr']:.2f}x" if row['pbr'] is not None else "—"
+        cons = " (E)" if row["is_consensus"] else ""
+        print(f"    {row['period']}{cons}: PER {per_str}, PBR {pbr_str}")
+
+    # FY24 검증: avg price 200 / EPS 8 = 25x
+    fy24 = df[df["period"] == "FY24"].iloc[0]
+    assert abs(fy24["per"] - 25.0) < 0.5, f"FY24 PER: expected 25x, got {fy24['per']}"
+
+    # FY25 검증: avg price 250 / EPS 10 = 25x
+    fy25 = df[df["period"] == "FY25"].iloc[0]
+    assert abs(fy25["per"] - 25.0) < 0.5, f"FY25 PER: expected 25x, got {fy25['per']}"
+
+    # FY24 PBR: 200 / (14e9/1e9) = 200/14 = 14.29x
+    expected_pbr = 200 / 14
+    assert abs(fy24["pbr"] - expected_pbr) < 0.5, \
+        f"FY24 PBR: expected {expected_pbr:.2f}x, got {fy24['pbr']}"
+
+    # Forward 검증: currentPrice 300 / forwardEps 15 = 20x
+    consensus = df[df["is_consensus"] == True]
+    assert len(consensus) == 1
+    cons_row = consensus.iloc[0]
+    assert abs(cons_row["per"] - 20.0) < 0.5, \
+        f"Consensus PER: expected 20x, got {cons_row['per']}"
+
+    # 평균 계산: (20 + 20 + 25 + 25) / 4 = 22.5
+    avg = result["avg_metrics"]
+    assert abs(avg["per_avg"] - 22.5) < 0.5, \
+        f"5Y avg PER: expected 22.5x, got {avg['per_avg']}"
+    print(f"  5Y avg: PER {avg['per_avg']:.1f}x, min {avg['per_min']:.1f}x, max {avg['per_max']:.1f}x")
+
+    print(f"  Primary signal: {result['signals'][0]['label']}")
+    print(f"  Narrative: {result['narrative']}")
+
+    print("✓ 미국 시계열 역산 정확")
+
+
+def test_us_fallback_no_price_history():
+    """price_history 없으면 simple 모드로 fallback."""
+    data = {
+        "meta": {"country": "US"},
+        "info": {
+            "trailingPE": 30.0,
+            "forwardPE": 22.0,
+            "priceToBook": 12.0,
+        },
+        "income_annual": pd.DataFrame(),
+        "balance_annual": pd.DataFrame(),
+        # price 없음
+    }
+    result = calculate_valuation_timeseries(data)
+    assert result is not None
+    # Simple fallback이면 components가 2개 (TTM + Forward)
+    assert len(result["components"]) == 2
+    print(f"  Fallback: {len(result['components'])} rows (TTM + Forward)")
+    print("✓ Price history 없을 때 fallback 정상")
+
+
+# ============================================================
 # 실행
 # ============================================================
 if __name__ == "__main__":
@@ -287,8 +409,14 @@ if __name__ == "__main__":
     print("\n[4] Average metrics")
     test_average_metrics()
 
-    print("\n[5] 미국 종목")
+    print("\n[5] 미국 종목 (simple — info만)")
     test_us_simple()
+
+    print("\n[5b] 미국 종목 시계열 역산 (Phase 3.5)")
+    test_us_timeseries_reconstruction()
+
+    print("\n[5c] 미국 fallback (price history 없을 때)")
+    test_us_fallback_no_price_history()
 
     print("\n[6] 빈 데이터")
     test_empty_data()

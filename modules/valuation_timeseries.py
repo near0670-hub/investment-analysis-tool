@@ -147,10 +147,163 @@ def _calculate_valuation_kr(data: dict, n_history: int) -> Optional[dict]:
 
 
 # ============================================================
-# 미국 종목: yfinance (현재 시점만, 시계열은 Phase 3.5)
+# 미국 종목: yfinance 주가 + EPS로 시계열 역산
 # ============================================================
 def _calculate_valuation_us(data: dict, n_history: int) -> Optional[dict]:
-    """미국 종목 valuation. 현재 시점 + forward 1Y만."""
+    """
+    미국 종목 valuation 시계열 역산.
+
+    데이터:
+    - 연간 EPS: yfinance income_annual['Diluted EPS' / 'Basic EPS']
+    - 자기자본: yfinance balance_annual['Stockholders Equity']
+    - 발행주식수: yfinance info['sharesOutstanding'] (현재값, 시계열 근사)
+    - 연간 평균 주가: yfinance price_history (일별 → 연도별 평균)
+    - 현재 주가: info['currentPrice']
+
+    역산:
+    - PER(FY) = 연평균 주가 / EPS(FY)
+    - PBR(FY) = 연평균 주가 / (Equity(FY) / Shares)
+    - Forward PER = currentPrice / forwardEps (info에서 직접도 가능)
+    """
+    from modules.financial_metrics import INCOME_ROW_ALIASES, BALANCE_ROW_ALIASES, get_row_series
+
+    info = data.get("info", {})
+    income_annual = data.get("income_annual", pd.DataFrame())
+    balance_annual = data.get("balance_annual", pd.DataFrame())
+    price_history = data.get("price", pd.DataFrame())  # data_loader 키: 'price'
+
+    if income_annual.empty:
+        # 시계열 못 만듦 → fallback (TTM + Forward만)
+        return _calculate_valuation_us_simple(data)
+
+    # EPS 시계열 (연간)
+    eps_series = get_row_series(income_annual, INCOME_ROW_ALIASES.get("diluted_eps",
+                                                                       ["Diluted EPS"])).dropna()
+    if eps_series.empty:
+        # Diluted EPS 없으면 Basic EPS 시도
+        eps_series = get_row_series(income_annual, ["Basic EPS"]).dropna()
+    if eps_series.empty:
+        # 매출/시총 등으로 역산도 가능하지만 fallback
+        return _calculate_valuation_us_simple(data)
+
+    # 자기자본 시계열
+    equity_series = get_row_series(balance_annual,
+                                   BALANCE_ROW_ALIASES["stockholders_equity"]).dropna()
+
+    # 발행주식수 (현재값으로 시계열 근사 — 한계 명시)
+    shares = info.get("sharesOutstanding")
+
+    # 연간 평균 주가 시계열 (price_history 없으면 현재값으로 근사)
+    annual_avg_prices = _compute_annual_avg_prices(price_history, eps_series.index)
+
+    # 현재 주가 (consensus 연도용)
+    current_price = info.get("currentPrice") or info.get("regularMarketPrice")
+
+    # 최근 n_history 연도만
+    sorted_cols = sorted(eps_series.index)
+    if len(sorted_cols) < 2:
+        return _calculate_valuation_us_simple(data)
+    actual_cols = sorted_cols[-n_history:]
+
+    rows = []
+    for col in actual_cols:
+        period_label = _format_year(col)
+        try:
+            year = pd.Timestamp(col).year
+        except (TypeError, ValueError):
+            continue
+
+        eps_val = float(eps_series[col]) if pd.notna(eps_series[col]) else None
+        equity_val = (float(equity_series[col])
+                      if col in equity_series.index and pd.notna(equity_series[col])
+                      else None)
+        avg_price = annual_avg_prices.get(year) or current_price
+
+        # PER
+        per = None
+        if eps_val is not None and avg_price is not None and eps_val > 0:
+            per = avg_price / eps_val
+
+        # PBR (BPS 역산)
+        pbr = None
+        if equity_val is not None and shares and avg_price is not None and shares > 0:
+            bps = equity_val / shares
+            if bps > 0:
+                pbr = avg_price / bps
+
+        rows.append({
+            "period": period_label,
+            "is_consensus": False,
+            "per": per,
+            "pbr": pbr,
+            "dividend_yield": None,  # 시계열 배당은 추가 작업
+            "ev_ebitda": None,
+        })
+
+    # ===== 컨센서스: Forward PER (forwardEps + currentPrice) =====
+    forward_eps = info.get("forwardEps")
+    if forward_eps and current_price and forward_eps > 0 and actual_cols:
+        last_year = pd.Timestamp(actual_cols[-1]).year
+        forward_per = current_price / forward_eps
+
+        # Forward PBR 추정: 최근 PBR 그대로 (자본 추정 어려움)
+        last_pbr = rows[-1]["pbr"] if rows else None
+
+        rows.append({
+            "period": f"FY{(last_year + 1) % 100:02d}",
+            "is_consensus": True,
+            "per": forward_per,
+            "pbr": last_pbr,        # 보수적 가정 — 자본 동일
+            "dividend_yield": None,
+            "ev_ebitda": None,
+        })
+
+    if len(rows) < 2:
+        return _calculate_valuation_us_simple(data)
+
+    df = pd.DataFrame(rows)
+    actual_df = df[df["is_consensus"] == False]
+
+    avg_metrics = {
+        "per_avg": actual_df["per"].mean() if actual_df["per"].notna().any() else None,
+        "per_min": actual_df["per"].min() if actual_df["per"].notna().any() else None,
+        "per_max": actual_df["per"].max() if actual_df["per"].notna().any() else None,
+        "pbr_avg": actual_df["pbr"].mean() if actual_df["pbr"].notna().any() else None,
+        "pbr_min": actual_df["pbr"].min() if actual_df["pbr"].notna().any() else None,
+        "pbr_max": actual_df["pbr"].max() if actual_df["pbr"].notna().any() else None,
+        "div_yield_avg": None,
+    }
+
+    current = actual_df.iloc[-1] if len(actual_df) > 0 else None
+    consensus_row = df[df["is_consensus"] == True].iloc[0] if (df["is_consensus"] == True).any() else None
+
+    # 자동 해설 — 한국과 동일한 시그널 분류 시스템
+    narrative_data = _generate_valuation_narrative(
+        df=df,
+        avg_metrics=avg_metrics,
+        current=current,
+        consensus_row=consensus_row,
+        data=data,
+    )
+
+    return {
+        "components": df,
+        "avg_metrics": avg_metrics,
+        "current": current.to_dict() if current is not None else None,
+        "consensus": consensus_row.to_dict() if consensus_row is not None else None,
+        "narrative": narrative_data["narrative"],
+        "signals": narrative_data["signals"],
+        "evidence": narrative_data["evidence"],
+        "source_note": "Source: yfinance · US-GAAP · "
+                       "PER = Annual avg price / Diluted EPS · "
+                       "PBR uses current shares outstanding (approximation)",
+        "country": "US",
+        "thresholds": THRESHOLDS,
+    }
+
+
+def _calculate_valuation_us_simple(data: dict) -> Optional[dict]:
+    """미국 종목 fallback - 시계열 못 만들 때 현재값만 (Phase 3과 동일)."""
     info = data.get("info", {})
     if not info:
         return None
@@ -158,13 +311,12 @@ def _calculate_valuation_us(data: dict, n_history: int) -> Optional[dict]:
     trailing_pe = info.get("trailingPE")
     forward_pe = info.get("forwardPE")
     pbr = info.get("priceToBook")
-    div_yield = info.get("dividendYield")  # yfinance는 0~1 비율로 줌
+    div_yield = info.get("dividendYield")
     ev_ebitda = info.get("enterpriseToEbitda")
 
     if all(v is None for v in [trailing_pe, forward_pe, pbr, ev_ebitda]):
         return None
 
-    # 현재 1개 기간 + 컨센서스 1개 = 최소 표시
     rows = [{
         "period": "TTM",
         "is_consensus": False,
@@ -179,27 +331,19 @@ def _calculate_valuation_us(data: dict, n_history: int) -> Optional[dict]:
             "period": "FY+1 (E)",
             "is_consensus": True,
             "per": forward_pe,
-            "pbr": None,    # forward PBR는 yfinance에 없음
+            "pbr": None,
             "dividend_yield": None,
             "ev_ebitda": None,
         })
 
     df = pd.DataFrame(rows)
-
     avg_metrics = {
-        "per_avg": trailing_pe,    # TTM만 → 평균은 의미 없음
-        "per_min": None,
-        "per_max": None,
-        "pbr_avg": pbr,
-        "pbr_min": None,
-        "pbr_max": None,
+        "per_avg": trailing_pe, "per_min": None, "per_max": None,
+        "pbr_avg": pbr, "pbr_min": None, "pbr_max": None,
         "div_yield_avg": div_yield,
     }
-
     current = pd.Series(rows[0])
     consensus_row = pd.Series(rows[1]) if len(rows) > 1 else None
-
-    # 자동 해설 (제한적 — 시계열 없으니 평균 비교 못 함)
     narrative_data = _generate_valuation_narrative_us(
         df=df, current=current, consensus_row=consensus_row, data=data
     )
@@ -212,11 +356,49 @@ def _calculate_valuation_us(data: dict, n_history: int) -> Optional[dict]:
         "narrative": narrative_data["narrative"],
         "signals": narrative_data["signals"],
         "evidence": narrative_data["evidence"],
-        "source_note": "Source: yfinance · US-GAAP · "
-                       "TTM + Forward only (full time series in Phase 3.5)",
+        "source_note": "Source: yfinance · TTM + Forward only "
+                       "(historical price data unavailable — install price_history)",
         "country": "US",
         "thresholds": THRESHOLDS,
     }
+
+
+def _compute_annual_avg_prices(price_history: pd.DataFrame, eps_dates) -> dict:
+    """
+    일별 가격 시계열 → 연도별 평균 가격.
+
+    Args:
+        price_history: index=Date, columns=[Open, High, Low, Close, ...] (yfinance 형식)
+        eps_dates: EPS가 있는 fiscal year-end 날짜들
+
+    Returns:
+        {year: avg_price} dict
+    """
+    result = {}
+    if price_history is None or price_history.empty:
+        return result
+
+    # 'Close' 컬럼 찾기
+    close_col = None
+    for candidate in ["Close", "Adj Close", "close", "adj_close"]:
+        if candidate in price_history.columns:
+            close_col = candidate
+            break
+    if close_col is None:
+        return result
+
+    # 연도별 그룹화 + 평균
+    try:
+        price_history = price_history.copy()
+        price_history.index = pd.to_datetime(price_history.index)
+        yearly_avg = price_history[close_col].groupby(price_history.index.year).mean()
+        for year, avg in yearly_avg.items():
+            if pd.notna(avg):
+                result[int(year)] = float(avg)
+    except (TypeError, ValueError, AttributeError):
+        pass
+
+    return result
 
 
 # ============================================================
