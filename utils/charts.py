@@ -15,14 +15,15 @@ import pandas as pd
 import plotly.graph_objects as go
 
 
-# 색상 팔레트 (블룸버그 스타일)
+# 색상 팔레트 (블룸버그 스타일 — 가독성 강화)
 COLOR_POSITIVE = "#22c55e"      # 양수 - 진한 녹색
 COLOR_NEGATIVE = "#ef4444"      # 음수 - 진한 빨강
 COLOR_POSITIVE_FUTURE = "rgba(34, 197, 94, 0.45)"   # 예상 양수 - 반투명 녹색
 COLOR_NEGATIVE_FUTURE = "rgba(239, 68, 68, 0.45)"   # 예상 음수 - 반투명 빨강
-COLOR_BG = "#0a0e14"
-COLOR_GRID = "#1f2937"
-COLOR_TEXT = "#a1a1aa"
+COLOR_BG = "#0a0a0a"            # 깊은 검정
+COLOR_GRID = "#262626"          # 살짝 밝게 (가독성)
+COLOR_TEXT = "#a1a1aa"          # 축 라벨
+COLOR_TEXT_BRIGHT = "#ffffff"   # 제목/주요
 
 
 def render_yoy_bar_chart(
@@ -84,7 +85,7 @@ def render_yoy_bar_chart(
     fig.update_layout(
         title=dict(
             text=title,
-            font=dict(size=12, color=COLOR_TEXT, family="IBM Plex Mono, monospace"),
+            font=dict(size=13, color=COLOR_TEXT_BRIGHT, family="Inter, sans-serif"),
             x=0,
             y=0.95,
             xanchor="left",
@@ -93,12 +94,12 @@ def render_yoy_bar_chart(
         margin=dict(l=40, r=20, t=40, b=40),
         paper_bgcolor=COLOR_BG,
         plot_bgcolor=COLOR_BG,
-        font=dict(family="IBM Plex Mono, monospace", color=COLOR_TEXT, size=10),
+        font=dict(family="Inter, sans-serif", color=COLOR_TEXT, size=10),
         xaxis=dict(
             showgrid=False,
             zeroline=False,
             color=COLOR_TEXT,
-            tickfont=dict(size=10),
+            tickfont=dict(size=10, family="IBM Plex Mono, monospace"),
         ),
         yaxis=dict(
             showgrid=True,
@@ -107,7 +108,7 @@ def render_yoy_bar_chart(
             zerolinecolor=COLOR_TEXT,
             zerolinewidth=1,
             color=COLOR_TEXT,
-            tickfont=dict(size=9),
+            tickfont=dict(size=9, family="IBM Plex Mono, monospace"),
             ticksuffix="%",
         ),
         showlegend=False,

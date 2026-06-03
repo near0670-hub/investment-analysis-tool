@@ -45,129 +45,362 @@ st.set_page_config(
 # Custom CSS — Bloomberg Terminal-inspired styling
 # ============================================================
 st.markdown("""
+<!-- Font import: Inter (본문/헤더), IBM Plex Mono (숫자/테이블), Material Symbols (아이콘) -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" rel="stylesheet">
+
 <style>
-/* === Typography === */
-.main, [data-testid="stSidebar"], .stApp {
-    font-family: 'IBM Plex Mono', 'JetBrains Mono', 'SF Mono', 'Menlo', 'Monaco', monospace;
+/* ============================================================
+   COLOR PALETTE — Bloomberg Terminal Style
+   ============================================================ */
+:root {
+    --bg-primary:    #0a0a0a;
+    --bg-card:       #141414;
+    --bg-elevated:   #1a1a1a;
+
+    --text-primary:    #ffffff;   /* 헤더, 주요 숫자 — 진짜 흰색 */
+    --text-secondary:  #d4d4d8;   /* 본문 텍스트 */
+    --text-tertiary:   #a1a1aa;   /* 보조 정보, 라벨 */
+    --text-muted:      #71717a;   /* 비활성, 단위, 캡션 */
+
+    --border:        #262626;     /* 구분선 (조금 밝게) */
+    --border-soft:   #1a1a1a;
+
+    --accent-blue:   #3b82f6;     /* 액센트/링크 */
+    --positive:      #22c55e;     /* 양수 */
+    --negative:      #ef4444;     /* 음수 */
+    --consensus:     #fbbf24;     /* 컨센서스/예상 */
 }
 
-/* Tighten default spacing */
-.block-container {
-    padding-top: 2rem;
-    padding-bottom: 2rem;
-    max-width: 1400px;
+/* ============================================================
+   TYPOGRAPHY — 하이브리드 (Inter for prose, Plex Mono for data)
+   ============================================================ */
+.main, [data-testid="stSidebar"], .stApp,
+.stMarkdown, p, div, span, label, button {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont,
+                 'Helvetica Neue', 'Segoe UI', sans-serif !important;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
 }
 
-/* === Headers === */
+/* ⭐ Material Icons (Streamlit 위젯의 화살표/아이콘) 예외 처리
+   — Inter로 강제되면 아이콘이 '_arrow_right' 같은 텍스트로 보임 */
+
+/* SVG 아이콘들은 폰트 영향 없음 (안전) */
+
+/* Material Symbols/Icons ligature 폰트 강제 보존 */
+[data-testid="stIconMaterial"],
+[data-testid="stIconMaterial"] *,
+.material-icons,
+.material-icons-outlined,
+.material-symbols-outlined,
+[class*="material-symbols"],
+span[class*="MaterialIcon"],
+span[class*="material-icon"] {
+    font-family: 'Material Symbols Outlined', 'Material Symbols Rounded',
+                 'Material Icons', 'Material Icons Outlined' !important;
+    font-feature-settings: 'liga';
+    -webkit-font-feature-settings: 'liga';
+    font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+
+/* Streamlit expander/button 안의 leading icon span 보호 */
+[data-testid="stExpander"] summary [data-testid="stIconMaterial"],
+button[kind] [data-testid="stIconMaterial"],
+[data-testid="stSidebar"] [data-testid="stIconMaterial"] {
+    font-family: 'Material Symbols Outlined' !important;
+}
+
+/* Inter import에 Material Symbols도 함께 import 추가 */
+
+/* 본문 텍스트 줄간격 + 색상 */
+.stMarkdown p {
+    color: var(--text-secondary) !important;
+    line-height: 1.6 !important;
+}
+
+/* === H1 (페이지 제목) === */
 h1 {
-    font-weight: 600 !important;
-    letter-spacing: -0.5px;
-    margin-bottom: 0.2rem !important;
-}
-h2, h3 {
-    font-weight: 500 !important;
-    letter-spacing: 0.3px;
-    text-transform: uppercase;
-    font-size: 0.85rem !important;
-    color: #71717a !important;
-    margin-top: 1.5rem !important;
-    margin-bottom: 0.8rem !important;
+    font-weight: 700 !important;
+    letter-spacing: -0.5px !important;
+    color: var(--text-primary) !important;
+    font-size: 1.6rem !important;
+    margin-bottom: 0.4rem !important;
 }
 
-/* === Metric labels & values === */
+/* === H2/H3 (섹션 제목) === */
+h2, h3 {
+    font-weight: 600 !important;
+    letter-spacing: 0.3px !important;
+    text-transform: uppercase;
+    font-size: 0.78rem !important;
+    color: var(--text-tertiary) !important;
+    margin-top: 1.8rem !important;
+    margin-bottom: 0.9rem !important;
+    border-bottom: 1px solid var(--border) !important;
+    padding-bottom: 0.4rem !important;
+}
+
+/* === H4 (서브섹션) — 흰색 강조 === */
+h4 {
+    font-weight: 600 !important;
+    color: var(--text-primary) !important;
+    font-size: 0.95rem !important;
+    margin-top: 1.2rem !important;
+}
+
+/* ============================================================
+   LAYOUT
+   ============================================================ */
+.block-container {
+    padding-top: 1.5rem;
+    padding-bottom: 3rem;
+    max-width: 1600px;            /* 1400 → 1600 (양 옆 활용) */
+}
+
+/* ============================================================
+   SECTION CARDS — 시니어 도구의 핵심 박스 시스템
+   ============================================================ */
+.section-card {
+    background: #141414;
+    border: 1px solid #525252;     /* 밝은 회색 — 본인 선택 */
+    border-radius: 4px;
+    padding: 16px 20px;
+    margin-bottom: 16px;
+}
+.section-card-header {
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #d4d4d8;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    border-bottom: 1px solid #404040;
+    padding-bottom: 8px;
+    margin-bottom: 12px;
+}
+.section-card-subtitle {
+    font-size: 0.78rem;
+    color: #a1a1aa;
+    margin-top: -8px;
+    margin-bottom: 12px;
+    line-height: 1.5;
+}
+
+/* H2/H3 안에 들어간 헤더는 카드 내부에서 자연스럽게 */
+.section-card h3, .section-card h4 {
+    border-bottom: none !important;
+    padding-bottom: 0 !important;
+    margin-top: 0 !important;
+    margin-bottom: 8px !important;
+}
+
+/* ============================================================
+   METRICS — 가장 중요한 위계 변경
+   ============================================================ */
 [data-testid="stMetricLabel"] {
     text-transform: uppercase;
     font-size: 0.7rem !important;
-    letter-spacing: 0.5px;
-    color: #71717a !important;
-}
-[data-testid="stMetricValue"] {
-    font-size: 1.4rem !important;
+    letter-spacing: 0.6px !important;
+    color: var(--text-muted) !important;
     font-weight: 500 !important;
-    font-family: 'IBM Plex Mono', monospace !important;
+}
+[data-testid="stMetricLabel"] p {
+    color: var(--text-muted) !important;
 }
 
-/* === Tabs === */
+[data-testid="stMetricValue"] {
+    font-size: 1.5rem !important;
+    font-weight: 500 !important;
+    font-family: 'IBM Plex Mono', monospace !important;
+    color: var(--text-primary) !important;   /* ← 흰색 (위계 ↑) */
+    letter-spacing: -0.3px;
+}
+
+[data-testid="stMetricDelta"] {
+    font-family: 'IBM Plex Mono', monospace !important;
+    font-size: 0.8rem !important;
+}
+
+/* ============================================================
+   TABS
+   ============================================================ */
 .stTabs [data-baseweb="tab-list"] {
     gap: 0;
-    border-bottom: 1px solid #27272a;
+    border-bottom: 1px solid var(--border);
 }
 .stTabs [data-baseweb="tab"] {
     text-transform: uppercase;
-    letter-spacing: 0.5px;
-    font-size: 0.8rem;
-    padding: 8px 20px;
-    color: #71717a;
+    letter-spacing: 0.6px;
+    font-size: 0.78rem;
+    font-weight: 500;
+    padding: 10px 22px;
+    color: var(--text-muted);
     border-radius: 0;
     border-bottom: 2px solid transparent;
 }
 .stTabs [aria-selected="true"] {
-    color: #d4d4d8 !important;
-    border-bottom: 2px solid #3b82f6 !important;
+    color: var(--text-primary) !important;
+    border-bottom: 2px solid var(--accent-blue) !important;
     background: transparent !important;
 }
 
-/* === Dividers === */
+/* ============================================================
+   DIVIDERS
+   ============================================================ */
 hr {
-    border-color: #27272a !important;
-    margin: 1rem 0 !important;
+    border-color: var(--border) !important;
+    margin: 1.4rem 0 !important;
 }
 
-/* === Sidebar === */
+/* ============================================================
+   SIDEBAR
+   ============================================================ */
 [data-testid="stSidebar"] {
-    border-right: 1px solid #27272a;
+    border-right: 1px solid var(--border);
+    background-color: var(--bg-card) !important;
 }
 [data-testid="stSidebar"] h1 {
-    font-size: 1rem !important;
+    font-size: 0.95rem !important;
+    font-weight: 700 !important;
     text-transform: uppercase;
     letter-spacing: 1.5px;
-    color: #d4d4d8 !important;
+    color: var(--text-primary) !important;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.6rem;
+    margin-bottom: 1rem !important;
+}
+[data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3 {
+    color: var(--text-tertiary) !important;
+    font-size: 0.72rem !important;
+    border-bottom: none !important;
+    padding-bottom: 0 !important;
+}
+[data-testid="stSidebar"] h5 {
+    color: var(--text-primary) !important;
+    text-transform: uppercase;
+    font-size: 0.7rem !important;
+    letter-spacing: 0.5px;
+    margin-top: 1rem !important;
+    margin-bottom: 0.5rem !important;
+}
+[data-testid="stSidebar"] label {
+    font-size: 0.78rem !important;
+    color: var(--text-secondary) !important;
 }
 
-/* === Custom signal badges === */
+/* Sidebar caption */
+[data-testid="stSidebar"] .stCaption,
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"] {
+    color: var(--text-muted) !important;
+    font-size: 0.72rem !important;
+    line-height: 1.5 !important;
+}
+
+/* ============================================================
+   CAPTIONS
+   ============================================================ */
+[data-testid="stCaptionContainer"], .stCaption {
+    color: var(--text-muted) !important;
+    font-size: 0.78rem !important;
+    line-height: 1.5 !important;
+}
+
+/* ============================================================
+   INPUT WIDGETS
+   ============================================================ */
+.stTextInput input, .stNumberInput input, .stSelectbox > div {
+    background-color: var(--bg-elevated) !important;
+    border: 1px solid var(--border) !important;
+    color: var(--text-primary) !important;
+    font-family: 'IBM Plex Mono', monospace !important;
+}
+.stCheckbox label, .stCheckbox label p {
+    color: var(--text-secondary) !important;
+    font-size: 0.85rem !important;
+}
+
+/* ============================================================
+   BADGES
+   ============================================================ */
 .badge {
     display: inline-block;
-    padding: 2px 8px;
+    padding: 3px 9px;
     border-radius: 3px;
-    font-size: 0.75rem;
-    font-weight: 500;
+    font-size: 0.7rem;
+    font-weight: 600;
     letter-spacing: 0.5px;
     text-transform: uppercase;
+    font-family: 'Inter', sans-serif;
 }
-.badge-na { background: #27272a; color: #71717a; }
-.badge-positive { background: rgba(22, 163, 74, 0.15); color: #4ade80; }
-.badge-negative { background: rgba(220, 38, 38, 0.15); color: #f87171; }
-.badge-warning { background: rgba(202, 138, 4, 0.15); color: #fbbf24; }
+.badge-na { background: var(--border); color: var(--text-muted); }
+.badge-positive { background: rgba(34, 197, 94, 0.15); color: #4ade80; }
+.badge-negative { background: rgba(239, 68, 68, 0.15); color: #f87171; }
+.badge-warning { background: rgba(251, 191, 36, 0.15); color: var(--consensus); }
 .badge-neutral { background: rgba(59, 130, 246, 0.15); color: #60a5fa; }
 
-/* === PEG card === */
+/* ============================================================
+   PEG CARDS
+   ============================================================ */
 .peg-card {
-    padding: 14px 16px;
-    background: #151b23;
-    border-left: 3px solid #3b82f6;
-    border-radius: 2px;
-    margin-bottom: 8px;
+    padding: 16px 18px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent-blue);
+    border-radius: 4px;
+    margin-bottom: 10px;
 }
 .peg-card .label {
     font-size: 0.7rem;
     text-transform: uppercase;
-    color: #71717a;
-    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    letter-spacing: 0.6px;
+    font-weight: 600;
 }
 .peg-card .value {
-    font-size: 1.8rem;
+    font-size: 1.9rem;
     font-weight: 500;
-    margin: 2px 0;
+    font-family: 'IBM Plex Mono', monospace;
+    color: var(--text-primary);
+    margin: 4px 0;
+    letter-spacing: -0.5px;
 }
 .peg-card .meta {
-    font-size: 0.75rem;
-    color: #a1a1aa;
+    font-size: 0.78rem;
+    color: var(--text-tertiary);
+    line-height: 1.5;
 }
 
-/* Suppress some Streamlit defaults */
+/* ============================================================
+   TABLES (HTML 인라인 테이블 가독성)
+   ============================================================ */
+table {
+    line-height: 1.5 !important;
+}
+
+/* ============================================================
+   STREAMLIT DEFAULTS — HIDE
+   ============================================================ */
 [data-testid="stHeader"] { background: transparent; }
 footer { display: none; }
 #MainMenu { visibility: hidden; }
+
+/* 사이드바 collapse 버튼 보기 좋게 */
+[data-testid="collapsedControl"] {
+    color: var(--text-tertiary) !important;
+}
+
+/* 코드 블록 색상 */
+code {
+    background: var(--bg-elevated) !important;
+    color: var(--positive) !important;
+    border: 1px solid var(--border);
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-family: 'IBM Plex Mono', monospace !important;
+    font-size: 0.85em;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -202,6 +435,21 @@ def normalize_ticker(raw: str) -> tuple[str, Optional[str]]:
 def badge(text: str, variant: str = "neutral") -> str:
     """Render an inline badge as HTML."""
     return f'<span class="badge badge-{variant}">{text}</span>'
+
+
+def section_card_open(title: str, subtitle: str = None) -> str:
+    """카드 박스 시작 (HTML 문자열 반환). st.markdown으로 출력."""
+    html = '<div class="section-card">'
+    if title:
+        html += f'<div class="section-card-header">{title}</div>'
+    if subtitle:
+        html += f'<div class="section-card-subtitle">{subtitle}</div>'
+    return html
+
+
+def section_card_close() -> str:
+    """카드 박스 끝."""
+    return '</div>'
 
 
 def render_signal_line(label: str, content: str, variant: str = "neutral"):
@@ -356,11 +604,11 @@ def render_header(data: dict):
 
     # Single compact header line
     st.markdown(
-        f"## {ticker} &nbsp; <span style='color:#71717a; font-weight: 400; font-size: 1rem;'>{name}</span>",
+        f"## {ticker} &nbsp; <span style='color:#a1a1aa; font-weight: 400; font-size: 1rem;'>{name}</span>",
         unsafe_allow_html=True
     )
     st.markdown(
-        f"<span style='color: #71717a; font-size: 0.85rem;'>"
+        f"<span style='color: #a1a1aa; font-size: 0.85rem;'>"
         f"{sector_display} · {country} · {currency} · "
         f"Exchange: {meta.get('exchange', 'N/A')}"
         f"</span>",
@@ -502,136 +750,229 @@ def render_growth_tab(data: dict, user_inputs: dict):
     quarterly_df = ts["quarterly"]
     annual_df = ts["annual"]
 
-    # ---------- Quarterly section ----------
-    st.markdown("### Quarterly Performance")
-    st.caption("Past quarters + 2 forward quarters (consensus/user input shown in amber).")
+    # ========== 상단: Snapshot Metrics + Momentum (2-column 카드) ==========
+    result = analyze_growth(data)
+    m = result["metrics"]
 
+    top_col1, top_col2 = st.columns([1, 1])
+
+    with top_col1:
+        st.markdown(section_card_open("SNAPSHOT METRICS"), unsafe_allow_html=True)
+        # 2x2 그리드 (4개 메트릭) - 각 메트릭에 충분한 너비 확보
+        row1 = st.columns(2)
+        row1[0].metric("Revenue YoY (Q)", display_value(m["quarterly_revenue_yoy"], format_yoy))
+        row1[1].metric("EPS YoY (Q)", display_value(m["quarterly_eps_yoy"], format_yoy))
+        row2 = st.columns(2)
+        row2[0].metric("Revenue 3Y CAGR", display_value(m["revenue_cagr_3y"], format_yoy))
+        row2[1].metric("EPS 3Y CAGR", display_value(m["eps_cagr_3y"], format_yoy))
+        st.markdown(section_card_close(), unsafe_allow_html=True)
+
+    with top_col2:
+        st.markdown(section_card_open("MOMENTUM INDICATORS"), unsafe_allow_html=True)
+
+        # 세로 배치 (카드 너비 좁아도 각 줄 충분한 너비)
+        accel = m["eps_accelerating"]
+        if accel is True:
+            st.markdown(
+                badge("ACCELERATING", "positive") +
+                ' &nbsp; <span style="color:#d4d4d8;">EPS growth rate increasing QoQ</span>',
+                unsafe_allow_html=True
+            )
+        elif accel is False:
+            st.markdown(
+                badge("DECELERATING", "warning") +
+                ' &nbsp; <span style="color:#d4d4d8;">EPS growth rate slowing QoQ</span>',
+                unsafe_allow_html=True
+            )
+        else:
+            st.markdown(
+                badge("N/A", "na") +
+                ' &nbsp; <span style="color:#a1a1aa;">Insufficient data for momentum</span>',
+                unsafe_allow_html=True
+            )
+
+        # 살짝 여백
+        st.markdown('<div style="margin-top:8px;"></div>', unsafe_allow_html=True)
+
+        ath = m["net_income_all_time_high"]
+        if ath is True:
+            st.markdown(
+                badge("ALL-TIME HIGH", "positive") +
+                ' &nbsp; <span style="color:#d4d4d8;">TTM net income at record peak</span>',
+                unsafe_allow_html=True
+            )
+        elif ath is False:
+            st.markdown(
+                badge("BELOW PEAK", "neutral") +
+                ' &nbsp; <span style="color:#d4d4d8;">TTM net income below all-time high</span>',
+                unsafe_allow_html=True
+            )
+        else:
+            st.markdown(
+                badge("N/A", "na") +
+                ' &nbsp; <span style="color:#a1a1aa;">Insufficient data for peak check</span>',
+                unsafe_allow_html=True
+            )
+
+        # Margin trend (있으면)
+        m_trend = m.get("margin_trend")
+        if m_trend:
+            st.markdown(
+                f'<div style="margin-top:10px; padding-top:8px; border-top:1px solid #262626;">'
+                f'<span style="color:#a1a1aa; font-size:0.78rem;">Margin trend (Y/Y): </span>'
+                f'<span style="color:#ffffff; font-family:\'IBM Plex Mono\',monospace; font-size:0.88rem;">'
+                f'{m_trend}</span>'
+                f'</div>',
+                unsafe_allow_html=True
+            )
+        st.markdown(section_card_close(), unsafe_allow_html=True)
+
+    # ========== Quarterly Performance 카드 ==========
+    n_q_future = len(ts.get("quarterly_future_periods", []))
+    q_past_count = len(quarterly_df) - n_q_future if not quarterly_df.empty else 0
+    q_caption = _build_dynamic_caption(
+        past_n=q_past_count, future_n=n_q_future,
+        period_unit="quarter", df=quarterly_df,
+    )
+
+    st.markdown(section_card_open("QUARTERLY PERFORMANCE", subtitle=q_caption),
+                unsafe_allow_html=True)
     if not quarterly_df.empty:
-        _render_timeseries_table(quarterly_df, currency=data["meta"].get("currency", "USD"),
-                                 is_annual=False)
-
-        # 차트 2개 (매출 YoY, EPS YoY)
-        chart_cols = st.columns(2)
-        with chart_cols[0]:
+        # 좌우 컬럼: 좌측 테이블, 우측 차트 2개 세로
+        q_left, q_right = st.columns([1.3, 1])
+        with q_left:
+            _render_timeseries_table(quarterly_df, currency=data["meta"].get("currency", "USD"),
+                                     is_annual=False)
+        with q_right:
             st.plotly_chart(
-                render_yoy_bar_chart(quarterly_df, "revenue_yoy", "Revenue YoY"),
+                render_yoy_bar_chart(quarterly_df, "revenue_yoy", "Revenue YoY", height=200),
                 use_container_width=True,
             )
-        with chart_cols[1]:
             st.plotly_chart(
-                render_yoy_bar_chart(quarterly_df, "eps_yoy", "EPS YoY"),
+                render_yoy_bar_chart(quarterly_df, "eps_yoy", "EPS YoY", height=200),
                 use_container_width=True,
             )
     else:
         st.markdown(badge("N/A", "na") + " &nbsp; No quarterly timeseries data available",
                     unsafe_allow_html=True)
+    st.markdown(section_card_close(), unsafe_allow_html=True)
 
-    # ---------- Annual section ----------
-    st.markdown("### Annual Performance")
-    st.caption("Past years + 2 forward years (consensus/user input shown in amber).")
+    # ========== Annual Performance 카드 ==========
+    n_a_future = len(ts.get("annual_future_periods", []))
+    a_past_count = len(annual_df) - n_a_future if not annual_df.empty else 0
+    a_caption = _build_dynamic_caption(
+        past_n=a_past_count, future_n=n_a_future,
+        period_unit="year", df=annual_df,
+    )
 
+    st.markdown(section_card_open("ANNUAL PERFORMANCE", subtitle=a_caption),
+                unsafe_allow_html=True)
     if not annual_df.empty:
-        _render_timeseries_table(annual_df, currency=data["meta"].get("currency", "USD"),
-                                 is_annual=True)
-
-        chart_cols = st.columns(2)
-        with chart_cols[0]:
+        a_left, a_right = st.columns([1.3, 1])
+        with a_left:
+            _render_timeseries_table(annual_df, currency=data["meta"].get("currency", "USD"),
+                                     is_annual=True)
+        with a_right:
             st.plotly_chart(
-                render_yoy_bar_chart(annual_df, "revenue_yoy", "Revenue YoY"),
+                render_yoy_bar_chart(annual_df, "revenue_yoy", "Revenue YoY", height=200),
                 use_container_width=True,
             )
-        with chart_cols[1]:
             st.plotly_chart(
-                render_yoy_bar_chart(annual_df, "eps_yoy", "EPS YoY"),
+                render_yoy_bar_chart(annual_df, "eps_yoy", "EPS YoY", height=200),
                 use_container_width=True,
             )
     else:
         st.markdown(badge("N/A", "na") + " &nbsp; No annual timeseries data available",
                     unsafe_allow_html=True)
+    st.markdown(section_card_close(), unsafe_allow_html=True)
 
-    st.markdown("---")
+    # ========== Operating Leverage Decomposition 카드 ==========
+    st.markdown(
+        section_card_open(
+            "OPERATING LEVERAGE DECOMPOSITION",
+            subtitle="Decomposes EPS-revenue growth gap into margin, share count, and non-operating effects."
+        ),
+        unsafe_allow_html=True
+    )
+    _render_operating_leverage_card(m)
+    st.markdown(section_card_close(), unsafe_allow_html=True)
 
-    # ========== 기존 GROWTH 분석 ==========
-    result = analyze_growth(data)
-    m = result["metrics"]
-
-    st.markdown("### Snapshot Metrics")
-    cols = st.columns(4)
-    cols[0].metric("Revenue YoY (Q)", display_value(m["quarterly_revenue_yoy"], format_yoy))
-    cols[1].metric("EPS YoY (Q)", display_value(m["quarterly_eps_yoy"], format_yoy))
-    cols[2].metric("Revenue 3Y CAGR", display_value(m["revenue_cagr_3y"], format_yoy))
-    cols[3].metric("EPS 3Y CAGR", display_value(m["eps_cagr_3y"], format_yoy))
-
-    st.markdown("### Momentum Indicators")
-
-    col1, col2 = st.columns(2)
-    with col1:
-        accel = m["eps_accelerating"]
-        if accel is True:
-            st.markdown(badge("ACCELERATING", "positive") + " &nbsp; EPS growth rate increasing QoQ", unsafe_allow_html=True)
-        elif accel is False:
-            st.markdown(badge("DECELERATING", "warning") + " &nbsp; EPS growth rate slowing QoQ", unsafe_allow_html=True)
-        else:
-            st.markdown(badge("N/A", "na") + " &nbsp; Insufficient data for momentum check", unsafe_allow_html=True)
-
-    with col2:
-        ath = m["net_income_all_time_high"]
-        if ath is True:
-            st.markdown(badge("ALL-TIME HIGH", "positive") + " &nbsp; TTM net income at record peak", unsafe_allow_html=True)
-        elif ath is False:
-            st.markdown(badge("BELOW PEAK", "neutral") + " &nbsp; TTM net income not at all-time high", unsafe_allow_html=True)
-        else:
-            st.markdown(badge("N/A", "na") + " &nbsp; Insufficient historical data", unsafe_allow_html=True)
-
-    # Operating Leverage Decomposition
-    st.markdown("### Operating Leverage Decomposition")
-    st.caption("Decomposes EPS-revenue growth gap into margin, share count, and non-operating effects.")
-
-    gap = m.get("gap_decomposition", {})
-    if gap.get("gap_pct") is not None:
-        gap_pct = gap["gap_pct"]
-        primary = gap.get("primary_driver", "")
-        # Translate
-        primary_en = primary.replace("영업레버리지", "Operating Leverage") \
-                            .replace("자사주 효과", "Share Buyback") \
-                            .replace("비영업 효과", "Non-Operating Items") \
-                            .replace("주도", "primary")
-
-        if abs(gap_pct) < 0.05:
-            st.markdown(
-                badge("ALIGNED", "neutral") +
-                f" &nbsp; EPS growth tracks revenue ({gap_pct:+.1%}p delta). Natural operating result.",
-                unsafe_allow_html=True
-            )
-        else:
-            sign = "above" if gap_pct > 0 else "below"
-            variant = "warning" if abs(gap_pct) > 0.2 else "neutral"
-            st.markdown(
-                badge(f"GAP {abs(gap_pct):.1%}p", variant) +
-                f" &nbsp; EPS growth {sign} revenue growth — {primary_en}",
-                unsafe_allow_html=True
-            )
-
-            with st.expander("Decomposition breakdown"):
-                margin = gap.get("margin_contribution")
-                share = gap.get("share_contribution")
-                residual = gap.get("residual")
-                if margin is not None:
-                    st.markdown(f"`Operating Leverage   {margin:+8.1%}p` &nbsp; (margin expansion)")
-                if share is not None:
-                    st.markdown(f"`Share Buyback       {share:+8.1%}p` &nbsp; (share count change)")
-                if residual is not None:
-                    st.markdown(f"`Non-Operating       {residual:+8.1%}p` &nbsp; (tax/interest/one-time)")
-    else:
-        st.markdown(badge("N/A", "na") + " &nbsp; Insufficient data for decomposition", unsafe_allow_html=True)
-
-    # Flags
-    if result["flags"]:
-        st.markdown("### Flags")
+    # ========== Flags 카드 (있으면) ==========
+    if result.get("flags"):
+        st.markdown(section_card_open("FLAGS"), unsafe_allow_html=True)
         for f in result["flags"]:
             variant = {"warning": "warning", "good": "positive", "info": "neutral"}.get(f["severity"], "neutral")
             label = {"warning": "RISK", "good": "STRENGTH", "info": "NOTE"}.get(f["severity"], "NOTE")
-            render_signal_line(label, _translate_flag_msg(f["msg"]), variant)
+            st.markdown(
+                f'{badge(label, variant)} &nbsp; <span style="color:#d4d4d8;">{_translate_flag_msg(f["msg"])}</span>',
+                unsafe_allow_html=True
+            )
+        st.markdown(section_card_close(), unsafe_allow_html=True)
+
+
+def render_growth_tab_OLD_REMOVED():
+    """REMOVED - replaced by new card-based layout"""
+    pass
+
+
+def _render_operating_leverage_card(m: dict):
+    """Operating Leverage Decomposition을 카드 안에 렌더링."""
+    gap = m.get("gap_decomposition", {})
+    if gap.get("gap_pct") is None:
+        st.markdown(badge("N/A", "na") + " &nbsp; Insufficient data for decomposition",
+                    unsafe_allow_html=True)
+        return
+
+    gap_pct = gap["gap_pct"]
+    primary = gap.get("primary_driver", "")
+    primary_en = primary.replace("영업레버리지", "Operating Leverage") \
+                        .replace("자사주 효과", "Share Buyback") \
+                        .replace("비영업 효과", "Non-Operating Items") \
+                        .replace("주도", "primary")
+
+    if abs(gap_pct) < 0.05:
+        st.markdown(
+            badge("ALIGNED", "neutral") +
+            f" &nbsp; EPS growth tracks revenue ({gap_pct:+.1%}p delta).",
+            unsafe_allow_html=True
+        )
+    else:
+        sign = "above" if gap_pct > 0 else "below"
+        variant = "warning" if abs(gap_pct) > 0.2 else "neutral"
+        st.markdown(
+            badge(f"GAP {abs(gap_pct):.1%}p", variant) +
+            f" &nbsp; EPS growth {sign} revenue — {primary_en}",
+            unsafe_allow_html=True
+        )
+
+    # 분해 상세
+    margin = gap.get("margin_contribution")
+    share = gap.get("share_contribution")
+    residual = gap.get("residual")
+    st.markdown('<div style="margin-top:10px; font-family:\'IBM Plex Mono\',monospace; font-size:0.82rem;">',
+                unsafe_allow_html=True)
+    if margin is not None:
+        color = "#22c55e" if margin >= 0 else "#ef4444"
+        st.markdown(
+            f'<div><span style="color:#a1a1aa;">Operating Leverage</span> '
+            f'<span style="color:{color}; float:right;">{margin:+.1%}p</span></div>',
+            unsafe_allow_html=True
+        )
+    if share is not None:
+        color = "#22c55e" if share >= 0 else "#ef4444"
+        st.markdown(
+            f'<div><span style="color:#a1a1aa;">Share Buyback</span> '
+            f'<span style="color:{color}; float:right;">{share:+.1%}p</span></div>',
+            unsafe_allow_html=True
+        )
+    if residual is not None:
+        color = "#22c55e" if residual >= 0 else "#ef4444"
+        st.markdown(
+            f'<div><span style="color:#a1a1aa;">Non-Operating</span> '
+            f'<span style="color:{color}; float:right;">{residual:+.1%}p</span></div>',
+            unsafe_allow_html=True
+        )
+    st.markdown('</div>', unsafe_allow_html=True)
 
 
 # ============================================================
@@ -641,7 +982,7 @@ def render_profitability_tab(data: dict):
     result = analyze_profitability(data)
     m = result["metrics"]
 
-    # Profile type badge
+    # ========== Profile Type 카드 ==========
     type_name = result.get("type", "")
     type_map = {
         "마진 주도형 ★": ("MARGIN-DRIVEN", "positive", "Strong pricing power, brand/moat economics."),
@@ -651,14 +992,20 @@ def render_profitability_tab(data: dict):
     }
     if type_name in type_map:
         label, variant, desc = type_map[type_name]
+        st.markdown(section_card_open("PROFILE TYPE"), unsafe_allow_html=True)
         st.markdown(
-            badge(label, variant) + f" &nbsp; <span style='color:#a1a1aa;'>{desc}</span>",
+            badge(label, variant) + f" &nbsp; <span style='color:#d4d4d8;'>{desc}</span>",
             unsafe_allow_html=True
         )
+        st.markdown(section_card_close(), unsafe_allow_html=True)
 
-    st.markdown("### DuPont 3-Factor Decomposition")
-    st.caption("ROE = Net Margin × Asset Turnover × Equity Multiplier")
+    # ========== DuPont 3-Factor — FULL WIDTH (핵심 메트릭) ==========
+    st.markdown(section_card_open(
+        "DUPONT 3-FACTOR",
+        subtitle="ROE = Net Margin × Asset Turnover × Equity Multiplier"
+    ), unsafe_allow_html=True)
 
+    # 4컬럼 전체 너비 (1600px → 각 ~380px, 충분한 너비)
     cols = st.columns(4)
     cols[0].metric("ROE", display_value(m["roe"], format_pct))
     cols[1].metric(
@@ -676,37 +1023,106 @@ def render_profitability_tab(data: dict):
         display_value(m["leverage"], format_number),
         help=f"Contribution: {format_pct(m['dupont']['leverage_contribution']) if m['dupont']['leverage_contribution'] else 'N/A'}"
     )
+    st.markdown(section_card_close(), unsafe_allow_html=True)
 
-    st.markdown("### Margin Structure")
-    cols = st.columns(3)
-    cols[0].metric("Gross Margin", display_value(m["gross_margin"], format_pct))
-    cols[1].metric("Operating Margin", display_value(m["operating_margin"], format_pct))
-    cols[2].metric("Net Margin", display_value(m["net_margin"], format_pct))
+    # ========== Margin Structure + Value Creation 좌우 ==========
+    mid_col1, mid_col2 = st.columns([1, 1])
 
-    # ROE vs COE
-    st.markdown("### Value Creation Test")
-    above = m.get("roe_above_coe")
-    coe = m.get("coe_assumed", 0.10)
-    if above is True:
-        st.markdown(
-            badge("VALUE CREATING", "positive") +
-            f" &nbsp; ROE ({format_pct(m['roe'])}) exceeds cost of equity ({format_pct(coe)})",
-            unsafe_allow_html=True
-        )
-    elif above is False:
-        st.markdown(
-            badge("VALUE DESTROYING", "negative") +
-            f" &nbsp; ROE ({format_pct(m['roe'])}) below cost of equity ({format_pct(coe)})",
-            unsafe_allow_html=True
-        )
+    with mid_col1:
+        st.markdown(section_card_open("MARGIN STRUCTURE"), unsafe_allow_html=True)
+        # 세로 배치 (라벨 + 값 한 줄씩) — 가독성 ↑
+        margin_rows = [
+            ("Gross Margin", m["gross_margin"]),
+            ("Operating Margin", m["operating_margin"]),
+            ("Net Margin", m["net_margin"]),
+        ]
+        margin_html = '<div style="font-family:Inter,sans-serif;">'
+        for label, val in margin_rows:
+            val_str = format_pct(val) if val is not None else "—"
+            margin_html += (
+                f'<div style="display:flex; justify-content:space-between; '
+                f'align-items:baseline; padding:10px 0; '
+                f'border-bottom:1px solid #262626;">'
+                f'<span style="color:#a1a1aa; font-size:0.85rem; '
+                f'text-transform:uppercase; letter-spacing:0.5px;">{label}</span>'
+                f'<span style="color:#ffffff; font-size:1.3rem; font-weight:500; '
+                f'font-family:\'IBM Plex Mono\',monospace; letter-spacing:-0.3px;">'
+                f'{val_str}</span>'
+                f'</div>'
+            )
+        margin_html += '</div>'
+        st.markdown(margin_html, unsafe_allow_html=True)
+        st.markdown(section_card_close(), unsafe_allow_html=True)
 
-    # Flags
-    if result["flags"]:
-        st.markdown("### Flags")
+    with mid_col2:
+        # Value Creation Test 별도 카드
+        st.markdown(section_card_open(
+            "VALUE CREATION TEST",
+            subtitle="ROE vs Cost of Equity (assumed 10%)"
+        ), unsafe_allow_html=True)
+
+        above = m.get("roe_above_coe")
+        coe = m.get("coe_assumed", 0.10)
+        roe_val = m.get("roe")
+
+        if above is True and roe_val is not None:
+            spread = (roe_val - coe) * 100
+            st.markdown(
+                f'<div style="text-align:center; padding:8px 0;">'
+                f'{badge("VALUE CREATING", "positive")}'
+                f'<div style="margin-top:14px; color:#ffffff; font-size:1.8rem; '
+                f'font-weight:500; font-family:\'IBM Plex Mono\',monospace;">'
+                f'+{spread:.1f}pp</div>'
+                f'<div style="color:#a1a1aa; font-size:0.78rem; margin-top:6px;">'
+                f'ROE {format_pct(roe_val)} − COE {format_pct(coe)}'
+                f'</div>'
+                f'</div>',
+                unsafe_allow_html=True
+            )
+        elif above is False and roe_val is not None:
+            spread = (roe_val - coe) * 100
+            st.markdown(
+                f'<div style="text-align:center; padding:8px 0;">'
+                f'{badge("VALUE DESTROYING", "negative")}'
+                f'<div style="margin-top:14px; color:#ef4444; font-size:1.8rem; '
+                f'font-weight:500; font-family:\'IBM Plex Mono\',monospace;">'
+                f'{spread:.1f}pp</div>'
+                f'<div style="color:#a1a1aa; font-size:0.78rem; margin-top:6px;">'
+                f'ROE {format_pct(roe_val)} − COE {format_pct(coe)}'
+                f'</div>'
+                f'</div>',
+                unsafe_allow_html=True
+            )
+        else:
+            st.markdown(
+                badge("N/A", "na") + ' &nbsp; <span style="color:#a1a1aa;">Insufficient data for ROE/COE comparison</span>',
+                unsafe_allow_html=True
+            )
+        st.markdown(section_card_close(), unsafe_allow_html=True)
+
+    # ========== ROE DuPont Decomposition (시계열) — 큰 카드 ==========
+    from modules.dupont_decomposition import calculate_dupont
+    dupont_result = calculate_dupont(data, n_history=2)
+
+    st.markdown(section_card_open(
+        "ROE DUPONT DECOMPOSITION — TIME SERIES",
+        subtitle="Multi-period decomposition: which factor drives ROE change?"
+    ), unsafe_allow_html=True)
+    if dupont_result is None:
+        st.markdown(badge("N/A", "na") + " &nbsp; Insufficient data for DuPont decomposition",
+                    unsafe_allow_html=True)
+    else:
+        _render_dupont_decomposition(dupont_result, data)
+    st.markdown(section_card_close(), unsafe_allow_html=True)
+
+    # ========== Flags 카드 ==========
+    if result.get("flags"):
+        st.markdown(section_card_open("FLAGS"), unsafe_allow_html=True)
         for f in result["flags"]:
             variant = {"warning": "warning", "good": "positive", "info": "neutral"}.get(f["severity"], "neutral")
             label = {"warning": "RISK", "good": "STRENGTH", "info": "NOTE"}.get(f["severity"], "NOTE")
             render_signal_line(label, _translate_flag_msg(f["msg"]), variant)
+        st.markdown(section_card_close(), unsafe_allow_html=True)
 
 
 # ============================================================
@@ -770,6 +1186,229 @@ def render_valuation_tab(data: dict, user_inputs: dict):
             render_signal_line(label, _translate_flag_msg(f["msg"]), variant)
 
 
+def _build_dynamic_caption(past_n: int, future_n: int, period_unit: str,
+                            df: pd.DataFrame) -> str:
+    """
+    실제 데이터에 맞는 동적 캡션 생성.
+
+    Args:
+        past_n: 과거 행 개수
+        future_n: 미래 (E/EST) 행 개수
+        period_unit: 'quarter' or 'year'
+        df: timeseries DataFrame (출처 식별용)
+
+    Returns:
+        예시:
+        - "Past 4 quarters + 2 forward (Naver consensus, amber)"
+        - "Past 4 quarters + 1 forward (user input, amber)"
+        - "Past 4 quarters (no forward data available)"
+    """
+    unit_label = period_unit + ("s" if past_n != 1 else "")
+
+    if future_n == 0:
+        return f"Past {past_n} {unit_label} (no forward {period_unit} data available — "\
+               f"enable manual override in sidebar to add estimates)"
+
+    # 미래 행의 source 컬럼에서 출처 식별
+    source_label = "estimate"
+    if df is not None and not df.empty and "source" in df.columns:
+        future_sources = df[df.get("is_future", False) == True]["source"].dropna().tolist()
+        if future_sources:
+            unique_sources = set(future_sources)
+            if unique_sources == {"user_input"}:
+                source_label = "user input"
+            elif unique_sources == {"consensus"}:
+                source_label = "Naver consensus"
+            elif "user_input" in unique_sources and "consensus" in unique_sources:
+                source_label = "Naver consensus + user input"
+
+    forward_label = period_unit + ("s" if future_n != 1 else "")
+    return f"Past {past_n} {unit_label} + {future_n} forward {forward_label} "\
+           f"({source_label}, shown in amber)"
+
+
+def _render_dupont_decomposition(result: dict, data: dict):
+    """
+    ROE 듀퐁 분해 시계열 렌더링.
+    본인 책 이미지 스타일 (3-row 분해 + 한 줄 해설).
+    """
+    components = result["components"]
+    country = result["country"]
+    source_note = result["source_note"]
+    narrative = result["narrative"]
+
+    # ----- 1) 연도별 ROE 헤더 카드 -----
+    st.markdown(
+        f'<div style="color:#a1a1aa; font-size:0.8rem; margin-bottom:8px;">'
+        f'{source_note}</div>',
+        unsafe_allow_html=True
+    )
+
+    # 연도별 ROE 큰 숫자 카드들
+    n_periods = len(components)
+    roe_cols = st.columns(n_periods)
+    for i, (_, row) in enumerate(components.iterrows()):
+        period = row["period"]
+        is_consensus = row.get("is_consensus", False)
+        roe = row.get("roe_display")
+
+        # 라벨 색상
+        period_color = "#fbbf24" if is_consensus else "#a1a1aa"  # actual은 보조색 (라벨이라)
+        period_label = period + (" (E)" if is_consensus else "")
+
+        # ROE 값 - actual은 흰색, consensus는 앰버
+        roe_str = f"{roe*100:.2f}%" if roe is not None else "—"
+        roe_color = "#fbbf24" if is_consensus else "#ffffff"
+
+        # YoY 변화 배지 (이전 행 대비)
+        delta_html = ""
+        if i > 0 and roe is not None:
+            prev_roe = components.iloc[i - 1].get("roe_display")
+            if prev_roe is not None:
+                delta = (roe - prev_roe) * 100
+                if delta >= 0.1:
+                    delta_html = (f'<div style="margin-top:6px; color:#22c55e; '
+                                  f'font-size:0.78rem; font-family:\'IBM Plex Mono\',monospace;">▲ +{delta:.2f}%p</div>')
+                elif delta <= -0.1:
+                    delta_html = (f'<div style="margin-top:6px; color:#ef4444; '
+                                  f'font-size:0.78rem; font-family:\'IBM Plex Mono\',monospace;">▼ {delta:.2f}%p</div>')
+                else:
+                    delta_html = ('<div style="margin-top:6px; color:#71717a; '
+                                  'font-size:0.78rem;">◯ flat</div>')
+
+        with roe_cols[i]:
+            st.markdown(
+                f'<div style="text-align:center; padding:16px 10px; '
+                f'background:#141414; border:1px solid #262626; '
+                f'border-radius:4px;">'
+                f'<div style="color:{period_color}; font-size:0.72rem; '
+                f'margin-bottom:8px; text-transform:uppercase; letter-spacing:0.6px; '
+                f'font-weight:600;">{period_label}</div>'
+                f'<div style="color:{roe_color}; font-size:1.8rem; '
+                f'font-weight:600; font-family:\'IBM Plex Mono\',monospace; '
+                f'letter-spacing:-0.5px;">'
+                f'{roe_str}</div>'
+                f'{delta_html}'
+                f'</div>',
+                unsafe_allow_html=True
+            )
+
+    # ----- 2) 듀퐁 분해 테이블 (3개 컴포넌트 × N개 기간) -----
+    st.markdown(
+        f'<div style="margin-top:20px; color:#a1a1aa; font-size:0.82rem; '
+        f'font-family:Inter,sans-serif;">'
+        f'<b style="color:#ffffff;">ROE</b> = Net Margin × Asset Turnover × Leverage'
+        f'</div>',
+        unsafe_allow_html=True
+    )
+
+    # 테이블 HTML 빌드
+    html = ['<table style="width:100%; border-collapse:collapse; '
+            'font-family:\'IBM Plex Mono\',monospace; font-size:0.85rem; margin-top:8px;">']
+
+    # 헤더
+    html.append('<thead><tr style="border-bottom:1px solid #262626;">')
+    html.append('<th style="text-align:left; padding:10px 8px; color:#a1a1aa; '
+                'font-weight:500;">Component</th>')
+    for _, row in components.iterrows():
+        period = row["period"]
+        is_c = row.get("is_consensus", False)
+        color = "#fbbf24" if is_c else "#d4d4d8"
+        label = period + " (E)" if is_c else period
+        html.append(f'<th style="text-align:right; padding:10px 8px; '
+                    f'color:{color}; font-weight:500;">{label}</th>')
+    html.append('</tr></thead><tbody>')
+
+    # 3개 컴포넌트 행
+    component_rows = [
+        ("Net Margin", "net_margin", "%", "Net Income ÷ Revenue"),
+        ("Asset Turnover", "asset_turnover", "x", "Revenue ÷ Avg Assets"),
+        ("Leverage", "leverage", "x", "Avg Assets ÷ Avg Equity"),
+    ]
+
+    for comp_label, comp_key, unit, formula in component_rows:
+        html.append('<tr style="border-bottom:1px solid #262626;">')
+        html.append(
+            f'<td style="padding:12px 8px;">'
+            f'<div style="color:#ffffff; font-weight:600; font-size:0.88rem;">{comp_label}</div>'
+            f'<div style="color:#71717a; font-size:0.72rem; margin-top:3px;">'
+            f'{formula}</div>'
+            f'</td>'
+        )
+
+        prev_val = None
+        for j, (_, row) in enumerate(components.iterrows()):
+            val = row.get(comp_key)
+            is_c = row.get("is_consensus", False)
+
+            if val is None or pd.isna(val):
+                cell_html = '<span style="color:#71717a;">—</span>'
+            else:
+                if unit == "%":
+                    val_str = f"{val*100:.2f}%"
+                else:
+                    val_str = f"{val:.2f}x"
+                cell_color = "#fbbf24" if is_c else "#ffffff"   # 흰색 강화
+
+                # YoY 델타 (이전 기간 대비)
+                delta_html = ""
+                if prev_val is not None and not pd.isna(prev_val):
+                    delta = val - prev_val
+                    if unit == "%":
+                        threshold = 0.005  # 0.5%p
+                        delta_str = f"{delta*100:+.2f}p.p."
+                    else:
+                        threshold = 0.02   # 0.02배
+                        delta_str = f"{delta:+.2f}x"
+
+                    if abs(delta) >= threshold:
+                        d_color = "#22c55e" if delta > 0 else "#ef4444"
+                        d_arrow = "▲" if delta > 0 else "▼"
+                        delta_html = (f'<div style="margin-top:3px; color:{d_color}; '
+                                      f'font-size:0.72rem; font-family:\'IBM Plex Mono\',monospace;">'
+                                      f'{d_arrow} {delta_str}</div>')
+                    else:
+                        delta_html = ('<div style="margin-top:3px; color:#71717a; '
+                                      'font-size:0.72rem;">◯ flat</div>')
+
+                cell_html = (f'<div style="color:{cell_color}; font-weight:500; '
+                             f'font-family:\'IBM Plex Mono\',monospace; font-size:1rem;">'
+                             f'{val_str}</div>{delta_html}')
+
+            html.append(f'<td style="padding:12px 8px; text-align:right;">{cell_html}</td>')
+            prev_val = val
+
+        html.append('</tr>')
+
+    html.append('</tbody></table>')
+    st.markdown("".join(html), unsafe_allow_html=True)
+
+    # ----- 3) 자동 해설 박스 -----
+    if narrative:
+        st.markdown(
+            f'<div style="margin-top:18px; padding:14px 16px; '
+            f'background:rgba(34,197,94,0.08); border-left:3px solid #22c55e; '
+            f'border-radius:4px; font-size:0.88rem; color:#ffffff; line-height:1.6;">'
+            f'<div style="color:#22c55e; font-size:0.72rem; font-weight:700; '
+            f'margin-bottom:6px; letter-spacing:0.6px;">INSIGHT</div>'
+            f'{narrative}'
+            f'</div>',
+            unsafe_allow_html=True
+        )
+
+    # ----- 4) 범례 -----
+    st.markdown(
+        '<div style="margin-top:12px; font-size:0.7rem; color:#71717a; '
+        'display:flex; gap:16px;">'
+        '<span><span style="color:#22c55e;">▲</span> YoY improvement</span>'
+        '<span><span style="color:#ef4444;">▼</span> YoY decline</span>'
+        '<span><span style="color:#a1a1aa;">◯</span> flat (small change)</span>'
+        '<span><span style="color:#fbbf24;">amber</span> consensus / estimate</span>'
+        '</div>',
+        unsafe_allow_html=True
+    )
+
+
 def _render_timeseries_table(df: pd.DataFrame, currency: str, is_annual: bool):
     """
     시계열 DataFrame을 HTML 테이블로 렌더링.
@@ -783,22 +1422,23 @@ def _render_timeseries_table(df: pd.DataFrame, currency: str, is_annual: bool):
     rev_unit = "억원" if is_krw else "M"
     eps_unit = "원" if is_krw else "$"
 
-    # HTML 테이블 빌드
-    html = ['<table style="width:100%; border-collapse: collapse; font-family: \'IBM Plex Mono\', monospace; font-size: 0.85rem;">']
-    html.append('<thead><tr style="border-bottom: 1px solid #27272a;">')
-    html.append('<th style="text-align: left; padding: 8px; color: #71717a; font-weight: 500;">Period</th>')
-    html.append(f'<th style="text-align: right; padding: 8px; color: #71717a; font-weight: 500;">Revenue ({rev_unit})</th>')
-    html.append('<th style="text-align: right; padding: 8px; color: #71717a; font-weight: 500;">Revenue YoY</th>')
-    html.append(f'<th style="text-align: right; padding: 8px; color: #71717a; font-weight: 500;">EPS ({eps_unit})</th>')
-    html.append('<th style="text-align: right; padding: 8px; color: #71717a; font-weight: 500;">EPS YoY</th>')
+    # HTML 테이블 빌드 (Inter for text labels, IBM Plex Mono for numbers)
+    html = ['<table style="width:100%; border-collapse: collapse; font-size: 0.85rem;">']
+    html.append('<thead><tr style="border-bottom: 1px solid #404040;">')
+    html.append('<th style="text-align: left; padding: 10px 8px; color: #71717a; font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.5px;">Period</th>')
+    html.append(f'<th style="text-align: right; padding: 10px 8px; color: #71717a; font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.5px;">Revenue ({rev_unit})</th>')
+    html.append('<th style="text-align: right; padding: 10px 8px; color: #71717a; font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.5px;">Revenue YoY</th>')
+    html.append(f'<th style="text-align: right; padding: 10px 8px; color: #71717a; font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.5px;">EPS ({eps_unit})</th>')
+    html.append('<th style="text-align: right; padding: 10px 8px; color: #71717a; font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.5px;">EPS YoY</th>')
     if is_annual:
-        html.append('<th style="text-align: right; padding: 8px; color: #71717a; font-weight: 500;">ROE</th>')
+        html.append('<th style="text-align: right; padding: 10px 8px; color: #71717a; font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.5px;">ROE</th>')
     html.append('</tr></thead><tbody>')
 
     for _, row in df.iterrows():
         is_future = row.get("is_future", False)
         bg_color = "background: rgba(251, 191, 36, 0.08);" if is_future else ""
-        period_color = "#fbbf24" if is_future else "#d4d4d8"
+        period_color = "#fbbf24" if is_future else "#ffffff"  # 액튜얼은 순백색
+        data_color = "#fbbf24" if is_future else "#ffffff"     # 매출/EPS 본 값도 흰색
 
         # 기간 라벨 (예상이면 '(E)' 추가)
         period_label = row["period"]
@@ -828,13 +1468,29 @@ def _render_timeseries_table(df: pd.DataFrame, currency: str, is_annual: bool):
         else:
             rev_yoy_str = "—"
 
-        # EPS
+        # EPS (Diluted 메인) + Basic은 tooltip으로
         eps = row.get("eps")
+        eps_basic = row.get("eps_basic")
         if eps is not None and not pd.isna(eps):
             if is_krw:
-                eps_str = f"{eps:,.0f}"
+                eps_str_raw = f"{eps:,.0f}"
             else:
-                eps_str = f"{eps:,.2f}"
+                eps_str_raw = f"{eps:,.2f}"
+
+            # Basic EPS 있으면 tooltip 추가 (희석 차이 정보 포함)
+            if eps_basic is not None and not pd.isna(eps_basic) and eps != 0:
+                if is_krw:
+                    basic_str = f"{eps_basic:,.0f}"
+                else:
+                    basic_str = f"{eps_basic:,.2f}"
+                dilution_pct = (eps_basic - eps) / abs(eps) * 100 if eps != 0 else 0
+                tooltip = (f"Diluted: {eps_str_raw} | Basic: {basic_str} | "
+                           f"Dilution: {dilution_pct:+.1f}%")
+                eps_str = (f'<span title="{tooltip}" '
+                           f'style="border-bottom: 1px dotted #a1a1aa; cursor: help;">'
+                           f'{eps_str_raw}</span>')
+            else:
+                eps_str = eps_str_raw
         else:
             eps_str = "—"
 
@@ -846,22 +1502,30 @@ def _render_timeseries_table(df: pd.DataFrame, currency: str, is_annual: bool):
         else:
             eps_yoy_str = "—"
 
-        # ROE (연간만)
+        # ROE (연간만) + 출처 표시
         if is_annual:
             roe = row.get("roe")
+            roe_source = row.get("roe_source")
             if roe is not None and not pd.isna(roe):
                 roe_str = f"{roe*100:.1f}%"
+                # 네이버 출처면 작은 표시 추가
+                if roe_source == "naver":
+                    roe_str = (f'<span title="Source: Naver (Korean equity consensus)" '
+                               f'style="border-bottom: 1px dotted #a1a1aa; cursor: help;">'
+                               f'{roe_str}</span>'
+                               f'<span style="color: #a1a1aa; font-size: 0.7rem; margin-left: 4px;">'
+                               f'ⁿ</span>')
             else:
                 roe_str = "—"
 
-        html.append(f'<tr style="{bg_color} border-bottom: 1px solid #1f2937;">')
-        html.append(f'<td style="padding: 8px;">{period_html}</td>')
-        html.append(f'<td style="padding: 8px; text-align: right;">{rev_str}</td>')
-        html.append(f'<td style="padding: 8px; text-align: right;">{rev_yoy_str}</td>')
-        html.append(f'<td style="padding: 8px; text-align: right;">{eps_str}</td>')
-        html.append(f'<td style="padding: 8px; text-align: right;">{eps_yoy_str}</td>')
+        html.append(f'<tr style="{bg_color} border-bottom: 1px solid #262626;">')
+        html.append(f'<td style="padding: 9px 8px;">{period_html}</td>')
+        html.append(f'<td style="padding: 9px 8px; text-align: right; color: {data_color}; font-family: \'IBM Plex Mono\', monospace;">{rev_str}</td>')
+        html.append(f'<td style="padding: 9px 8px; text-align: right;">{rev_yoy_str}</td>')
+        html.append(f'<td style="padding: 9px 8px; text-align: right; color: {data_color}; font-family: \'IBM Plex Mono\', monospace;">{eps_str}</td>')
+        html.append(f'<td style="padding: 9px 8px; text-align: right;">{eps_yoy_str}</td>')
         if is_annual:
-            html.append(f'<td style="padding: 8px; text-align: right;">{roe_str}</td>')
+            html.append(f'<td style="padding: 9px 8px; text-align: right; color: {data_color}; font-family: \'IBM Plex Mono\', monospace;">{roe_str}</td>')
         html.append('</tr>')
 
     html.append('</tbody></table>')
@@ -873,9 +1537,9 @@ def _render_peg_card(label: str, sublabel: str, peg: dict):
     if peg["value"] is None:
         st.markdown(
             f"""
-            <div class="peg-card" style="border-left-color: #52525b;">
+            <div class="peg-card" style="border-left-color: #71717a;">
                 <div class="label">{label}</div>
-                <div class="value" style="color: #71717a;">N/A</div>
+                <div class="value" style="color: #a1a1aa;">N/A</div>
                 <div class="meta">{peg.get('note', '')}</div>
             </div>
             """,
@@ -891,7 +1555,7 @@ def _render_peg_card(label: str, sublabel: str, peg: dict):
         "⚠":  "#fb923c",
         "✗":  "#ef4444",
     }
-    verdict_color = color_map.get(verdict, "#71717a")
+    verdict_color = color_map.get(verdict, "#a1a1aa")
 
     growth_used = peg.get("growth_used")
     growth_str = f"Growth: {growth_used:.1%}" if growth_used is not None else ""

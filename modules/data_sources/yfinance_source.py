@@ -43,6 +43,7 @@ def fetch_yfinance(ticker: str, verbose: bool = False) -> dict:
         "cashflow_quarterly": _safe_attr("quarterly_cashflow", pd.DataFrame()),
         "cashflow_annual":    _safe_attr("cashflow", pd.DataFrame()),
         "earnings_dates":     _safe_attr("earnings_dates", None),
+        "earnings_history":   _safe_attr("earnings_history", pd.DataFrame()),  # 분기 EPS 8개 확장용
         "dividends":          _safe_attr("dividends", pd.Series(dtype=float)),
         "recommendations":    _safe_attr("recommendations", None),
     }

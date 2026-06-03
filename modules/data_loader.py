@@ -231,6 +231,140 @@ def _merge_financial_statements(
     return merged
 
 
+def _fix_q4_cumulative_to_quarterly(
+    quarterly_df: pd.DataFrame,
+    annual_df: pd.DataFrame,
+    verbose: bool = False,
+) -> pd.DataFrame:
+    """
+    한국 종목: Q4 분기 컬럼에 들어있는 연간 누적값을 진짜 분기값으로 변환.
+
+    DART 사업보고서(11011)는 연간 누적값을 보고하는데, 우리 병합 로직이
+    분기말 날짜(예: 2024-12-30)와 연간 마지막 날짜(2024-12-31)를 ±15일 매칭하면서
+    연간 누적값이 4분기 자리에 들어오는 버그.
+
+    예시 (삼성전자):
+        Q1: 71.9조, Q2: 74.1조, Q3: 79.1조, Q4 자리: 300.9조 (연간 누적)
+        → 정상화: Q4 = 300.9 - (71.9 + 74.1 + 79.1) = 75.8조
+
+    이 변환은 flow 항목(매출, 영업이익, 순이익 등)에만 적용.
+    stock 항목(자산, 부채, 자본 등)은 분기말 시점값이므로 누적이 아님.
+    → balance sheet에는 이 함수를 적용하지 않음 (호출 측에서 제외).
+    """
+    if quarterly_df is None or quarterly_df.empty:
+        return quarterly_df
+    if annual_df is None or annual_df.empty:
+        # 연간 데이터 없으면 보정 불가
+        return quarterly_df
+
+    # 분기 컬럼을 연도별로 그룹핑
+    # 컬럼은 보통 pd.Timestamp
+    quarterly_cols = list(quarterly_df.columns)
+    annual_cols = list(annual_df.columns)
+
+    fixed_df = quarterly_df.copy()
+    n_fixes = 0
+
+    # 연도별로 처리
+    years_processed = set()
+    for q_col in quarterly_cols:
+        try:
+            q_ts = pd.Timestamp(q_col)
+        except (TypeError, ValueError):
+            continue
+
+        year = q_ts.year
+        if year in years_processed:
+            continue
+
+        # 해당 연도의 모든 분기 찾기
+        year_quarters = []
+        for c in quarterly_cols:
+            try:
+                c_ts = pd.Timestamp(c)
+                if c_ts.year == year:
+                    year_quarters.append((c, c_ts))
+            except (TypeError, ValueError):
+                continue
+
+        # 4개 분기가 다 있어야 보정 가능
+        if len(year_quarters) < 4:
+            continue
+
+        # 분기 정렬 (시간순)
+        year_quarters.sort(key=lambda x: x[1])
+        q1_col, q2_col, q3_col, q4_col = [c for c, _ in year_quarters[:4]]
+
+        # 해당 연도의 연간 컬럼 찾기 (±15일 이내)
+        annual_col = None
+        for a_col in annual_cols:
+            try:
+                a_ts = pd.Timestamp(a_col)
+                if a_ts.year == year:
+                    annual_col = a_col
+                    break
+            except (TypeError, ValueError):
+                continue
+
+        if annual_col is None:
+            continue
+
+        # 각 행(항목)에 대해 Q4 보정
+        for row in fixed_df.index:
+            try:
+                q1_val = fixed_df.at[row, q1_col]
+                q2_val = fixed_df.at[row, q2_col]
+                q3_val = fixed_df.at[row, q3_col]
+                q4_val = fixed_df.at[row, q4_col]
+                annual_val = annual_df.at[row, annual_col] if row in annual_df.index else None
+
+                # Q1, Q2, Q3, annual은 반드시 있어야 함 (보정의 입력값)
+                if any(pd.isna(v) for v in [q1_val, q2_val, q3_val, annual_val]):
+                    continue
+
+                q1_val = float(q1_val); q2_val = float(q2_val)
+                q3_val = float(q3_val)
+                annual_val = float(annual_val)
+                q123_sum = q1_val + q2_val + q3_val
+
+                # 케이스 1: Q4가 NaN — DART가 Q4 분기 데이터를 안 줄 때
+                # (예: SK하이닉스 EPS, 한국 기업의 분기 EPS는 흔히 4Q 빠짐)
+                # → 연간 - Q1Q2Q3 = Q4 분기값으로 채움
+                if pd.isna(q4_val):
+                    real_q4 = annual_val - q123_sum
+                    fixed_df.at[row, q4_col] = real_q4
+                    n_fixes += 1
+                    if verbose and row in ("Total Revenue", "Net Income", "Operating Income",
+                                            "Diluted EPS", "Basic EPS"):
+                        print(f"    [Q4 fill from annual] {row} {year}: NaN → "
+                              f"{real_q4:.2f} (annual {annual_val:.2f} - sum {q123_sum:.2f})")
+                    continue
+
+                # 케이스 2: Q4가 있는데 연간 누적값과 비슷함 (≈ 잘못 매칭됨)
+                # → 진짜 Q4 = annual - Q1Q2Q3 으로 변환
+                q4_val = float(q4_val)
+                if annual_val != 0 and abs(q4_val - annual_val) / abs(annual_val) < 0.05:
+                    real_q4 = annual_val - q123_sum
+                    fixed_df.at[row, q4_col] = real_q4
+                    n_fixes += 1
+                    if verbose and row in ("Total Revenue", "Net Income", "Operating Income",
+                                            "Diluted EPS", "Basic EPS"):
+                        unit_label = "조" if abs(annual_val) > 1e9 else ""
+                        scale = 1e12 if abs(annual_val) > 1e9 else 1
+                        print(f"    [Q4 fix cumulative] {row} {year}: "
+                              f"{q4_val/scale:.2f}{unit_label} → {real_q4/scale:.2f}{unit_label} "
+                              f"(annual {annual_val/scale:.2f} - sum {q123_sum/scale:.2f})")
+            except (KeyError, ValueError, TypeError):
+                continue
+
+        years_processed.add(year)
+
+    if verbose and n_fixes > 0:
+        print(f"  [Q4 cumulative fix] {n_fixes} cells corrected across {len(years_processed)} years")
+
+    return fixed_df
+
+
 # ============================================================
 # 메인 로더
 # ============================================================
@@ -376,6 +510,22 @@ def load_company_data(
     )
 
     # ============================================================
+    # 5-B. 한국 종목: Q4 누적값 보정 (DART 사업보고서 이슈)
+    # ============================================================
+    # DART 사업보고서(11011)는 연간 누적값을 보고하는데, 우리 병합 로직이
+    # 분기말 날짜와 연간 마지막 날짜를 ±15일 이내로 매칭하면서
+    # 연간 누적값이 Q4 자리로 들어옴 (예: 삼성전자 4Q25 매출 333조 = 연간 누적)
+    # → flow 항목(매출, 영업이익, 순이익 등)에 대해 Q4 = 연간 - (Q1+Q2+Q3) 으로 변환
+    if country == "KR" and dart_data:
+        income_quarterly = _fix_q4_cumulative_to_quarterly(
+            income_quarterly, income_annual, verbose=verbose
+        )
+        cashflow_quarterly = _fix_q4_cumulative_to_quarterly(
+            cashflow_quarterly, cashflow_annual, verbose=verbose
+        )
+        # balance는 stock 항목이라 보정 불필요 (분기말 시점값)
+
+    # ============================================================
     # 6. 메타 정보
     # ============================================================
     yf_sector = info.get("sector")
@@ -442,6 +592,7 @@ def load_company_data(
         "cashflow_quarterly": cashflow_quarterly,
         "cashflow_annual":    cashflow_annual,
         "earnings_dates":     yf_data.get("earnings_dates"),
+        "earnings_history":   yf_data.get("earnings_history", pd.DataFrame()),  # 분기 EPS 확장
         "dividends":          yf_data.get("dividends", pd.Series(dtype=float)),
         "shares_outstanding": info.get("sharesOutstanding"),
         "recommendations":    yf_data.get("recommendations"),

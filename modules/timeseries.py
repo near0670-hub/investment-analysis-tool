@@ -74,6 +74,7 @@ def extract_timeseries(
     income_a = data.get("income_annual", pd.DataFrame())
     balance_a = data.get("balance_annual", pd.DataFrame())
     info = data.get("info", {})
+    earnings_history = data.get("earnings_history", pd.DataFrame())
 
     # 1. 분기 시계열 (과거 + 미래)
     quarterly = _build_quarterly_timeseries(
@@ -81,6 +82,7 @@ def extract_timeseries(
         n_history=n_quarters_history,
         user_quarterly_eps=user_quarterly_eps,
         naver_data=naver_data,
+        earnings_history=earnings_history,
     )
 
     # 2. 연간 시계열 (과거 + 미래)
@@ -113,29 +115,36 @@ def _build_quarterly_timeseries(
     n_history: int,
     user_quarterly_eps: Optional[list[float]],
     naver_data: Optional[dict],
+    earnings_history: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
-    """분기 시계열 (과거 n개 + 미래 2개)."""
+    """분기 시계열 (과거 n개 + 미래 2개).
+
+    EPS 시리즈는 quarterly_financials (5분기) + earnings_history (8분기)를 병합해서
+    더 긴 시계열로 만든다. Diluted EPS 우선, Basic EPS는 보조로 같이 들고감.
+    """
     rows = []
 
-    # 1) 과거 분기 데이터 (yfinance + DART, 이미 data_loader에서 병합됨)
+    # 1) 과거 분기 데이터
     revenue_series = get_row_series(income_q, INCOME_ROW_ALIASES["revenue"]).dropna()
-    eps_series = get_row_series(income_q, INCOME_ROW_ALIASES["diluted_eps"]).dropna()
-    if eps_series.empty:
-        eps_series = get_row_series(income_q, INCOME_ROW_ALIASES["basic_eps"]).dropna()
+    diluted_eps_series = get_row_series(income_q, INCOME_ROW_ALIASES["diluted_eps"]).dropna()
+    basic_eps_series = get_row_series(income_q, INCOME_ROW_ALIASES["basic_eps"]).dropna()
 
-    # 컬럼(분기) 정렬 (최신 → 과거)
-    all_cols = sorted(set(revenue_series.index) | set(eps_series.index), reverse=True)
-    history_cols = all_cols[:n_history]
-    # 표시는 과거 → 최신 순으로
+    # 메인 EPS 시리즈: Diluted 우선, 없으면 Basic
+    eps_series = diluted_eps_series if not diluted_eps_series.empty else basic_eps_series
+
+    # earnings_history로 EPS 시리즈 확장
+    eps_series = _augment_eps_with_earnings_history(eps_series, earnings_history)
+
+    # 매출 기반으로 history_cols 결정
+    history_cols = sorted(revenue_series.index, reverse=True)[:n_history]
     history_cols = sorted(history_cols)
 
-    # YoY 계산을 위해 1년 전 데이터도 필요
     for col in history_cols:
         period_label = _format_quarter_label(col)
         revenue = _safe_get(revenue_series, col)
         eps = _safe_get(eps_series, col)
+        eps_basic = _safe_get(basic_eps_series, col)  # 보조
 
-        # YoY: 1년 전 (4분기 전) 찾기
         revenue_yoy = _calc_yoy_quarterly(revenue_series, col)
         eps_yoy = _calc_yoy_quarterly(eps_series, col)
 
@@ -144,13 +153,14 @@ def _build_quarterly_timeseries(
             "revenue": revenue,
             "revenue_yoy": revenue_yoy,
             "eps": eps,
+            "eps_basic": eps_basic,
             "eps_yoy": eps_yoy,
-            "roe": None,  # 분기 ROE는 노이즈 큼, 생략
+            "roe": None,
             "is_future": False,
             "source": "actual",
         })
 
-    # 2) 미래 분기 (네이버 + 사용자 입력)
+    # 2) 미래 분기
     future_rows = _build_future_quarterly_rows(
         last_actual_col=history_cols[-1] if history_cols else None,
         last_actual_revenue=rows[-1]["revenue"] if rows else None,
@@ -160,15 +170,69 @@ def _build_quarterly_timeseries(
         history_revenue_series=revenue_series,
         history_eps_series=eps_series,
     )
+    # 미래 행에는 eps_basic이 없음 → None으로 채움
+    for fr in future_rows:
+        if "eps_basic" not in fr:
+            fr["eps_basic"] = None
     rows.extend(future_rows)
 
     if not rows:
         return pd.DataFrame(columns=[
-            "period", "revenue", "revenue_yoy", "eps", "eps_yoy",
+            "period", "revenue", "revenue_yoy", "eps", "eps_basic", "eps_yoy",
             "roe", "is_future", "source"
         ])
 
     return pd.DataFrame(rows)
+
+
+def _augment_eps_with_earnings_history(
+    eps_series: pd.Series,
+    earnings_history: Optional[pd.DataFrame],
+) -> pd.Series:
+    """
+    yfinance earnings_history (분기 EPS 8개)를 quarterly_financials EPS와 병합.
+
+    earnings_history는 보통 'epsActual', 'epsEstimate' 같은 컬럼을 가짐.
+    실제 EPS인 'epsActual'을 사용. 기존 eps_series에 없는 분기만 추가.
+    """
+    if earnings_history is None or earnings_history.empty:
+        return eps_series
+
+    # 'epsActual' 컬럼 찾기
+    eps_col = None
+    for candidate in ["epsActual", "actualEps", "EPS Actual", "epsactual"]:
+        if candidate in earnings_history.columns:
+            eps_col = candidate
+            break
+    if eps_col is None:
+        return eps_series
+
+    augmented = eps_series.copy()
+
+    for idx in earnings_history.index:
+        try:
+            ts = pd.Timestamp(idx)
+            val = earnings_history.at[idx, eps_col]
+            if pd.isna(val):
+                continue
+
+            # 기존 시리즈에 이미 비슷한 날짜(±45일)가 있으면 skip
+            already_exists = False
+            for existing in augmented.index:
+                try:
+                    if abs(pd.Timestamp(existing) - ts) <= pd.Timedelta(days=45):
+                        already_exists = True
+                        break
+                except (TypeError, ValueError):
+                    continue
+            if not already_exists:
+                augmented[ts] = float(val)
+        except (TypeError, ValueError, KeyError):
+            continue
+
+    # 정렬해서 반환
+    augmented = augmented.dropna().sort_index(ascending=False)
+    return augmented
 
 
 def _build_future_quarterly_rows(
@@ -246,9 +310,9 @@ def _build_annual_timeseries(
     rows = []
 
     revenue_series = get_row_series(income_a, INCOME_ROW_ALIASES["revenue"]).dropna()
-    eps_series = get_row_series(income_a, INCOME_ROW_ALIASES["diluted_eps"]).dropna()
-    if eps_series.empty:
-        eps_series = get_row_series(income_a, INCOME_ROW_ALIASES["basic_eps"]).dropna()
+    diluted_eps_series = get_row_series(income_a, INCOME_ROW_ALIASES["diluted_eps"]).dropna()
+    basic_eps_series = get_row_series(income_a, INCOME_ROW_ALIASES["basic_eps"]).dropna()
+    eps_series = diluted_eps_series if not diluted_eps_series.empty else basic_eps_series
     net_income_series = get_row_series(income_a, INCOME_ROW_ALIASES["net_income"]).dropna()
     equity_series = get_row_series(balance_a, BALANCE_ROW_ALIASES["stockholders_equity"]).dropna()
 
@@ -260,20 +324,31 @@ def _build_annual_timeseries(
         period_label = _format_year_label(col)
         revenue = _safe_get(revenue_series, col)
         eps = _safe_get(eps_series, col)
+        eps_basic = _safe_get(basic_eps_series, col)
         net_income = _safe_get(net_income_series, col)
         equity = _safe_get(equity_series, col)
 
         revenue_yoy = _calc_yoy_annual(revenue_series, col)
         eps_yoy = _calc_yoy_annual(eps_series, col)
         roe = safe_divide(net_income, equity)
+        roe_source = "computed" if roe is not None else None
+
+        # ROE가 None이면 네이버 ROE로 fallback (한국 종목)
+        if roe is None and naver_data is not None:
+            naver_roe = _get_naver_annual_roe(naver_data, period_label)
+            if naver_roe is not None:
+                roe = naver_roe / 100.0  # 네이버는 % 단위 → 비율로
+                roe_source = "naver"
 
         rows.append({
             "period": period_label,
             "revenue": revenue,
             "revenue_yoy": revenue_yoy,
             "eps": eps,
+            "eps_basic": eps_basic,
             "eps_yoy": eps_yoy,
             "roe": roe,
+            "roe_source": roe_source,
             "is_future": False,
             "source": "actual",
         })
@@ -316,7 +391,7 @@ def _build_future_annual_rows(
     next_years = [last_year + 1, last_year + 2]
 
     for i, year in enumerate(next_years):
-        period_label = f"{year}.12"
+        period_label = f"FY{year % 100:02d}"
         eps = None
         source = None
 
@@ -346,13 +421,24 @@ def _build_future_annual_rows(
             if revenue is not None:
                 revenue_yoy = _calc_yoy_for_future_revenue_annual(year, revenue, history_revenue_series)
 
+        # 미래 ROE: 네이버 컨센서스에서 가져오기 (한국 종목)
+        future_roe = None
+        roe_source = None
+        if naver_data is not None:
+            naver_roe = _get_naver_annual_roe(naver_data, period_label)
+            if naver_roe is not None:
+                future_roe = naver_roe / 100.0
+                roe_source = "naver"
+
         future_rows.append({
             "period": period_label,
             "revenue": revenue,
             "revenue_yoy": revenue_yoy,
             "eps": eps,
+            "eps_basic": None,
             "eps_yoy": eps_yoy,
-            "roe": None,  # 미래 ROE는 자기자본 추정 어려움
+            "roe": future_roe,
+            "roe_source": roe_source,
             "is_future": True,
             "source": source,
         })
@@ -376,19 +462,27 @@ def _safe_get(series: pd.Series, key) -> Optional[float]:
 
 
 def _format_quarter_label(col) -> str:
-    """Timestamp 또는 str을 'YYYY.MM' 형식으로."""
+    """
+    Timestamp을 '3Q25' 형식으로 (분기 먼저, 연도 뒤 - 블룸버그/IB 표준).
+    예: 2025-07-31 → 3Q25, 2026-01-31 → 1Q26
+    """
     try:
         ts = pd.Timestamp(col)
-        return f"{ts.year}.{ts.month:02d}"
+        year_short = ts.year % 100  # 2025 → 25
+        month = ts.month
+        # 분기 매핑: 1-3=Q1, 4-6=Q2, 7-9=Q3, 10-12=Q4
+        quarter = (month - 1) // 3 + 1
+        return f"{quarter}Q{year_short:02d}"
     except (TypeError, ValueError):
         return str(col)
 
 
 def _format_year_label(col) -> str:
-    """Timestamp 또는 str을 'YYYY.12' 형식으로."""
+    """Timestamp을 'FY25' 형식으로 (회계연도)."""
     try:
         ts = pd.Timestamp(col)
-        return f"{ts.year}.{ts.month:02d}"
+        year_short = ts.year % 100
+        return f"FY{year_short:02d}"
     except (TypeError, ValueError):
         return str(col)
 
@@ -448,7 +542,7 @@ def _calc_yoy_annual(series: pd.Series, current_col) -> Optional[float]:
 
 
 def _next_quarter_labels(last_col, n: int = 2) -> list[str]:
-    """마지막 분기 다음 n개 분기 라벨 만들기."""
+    """마지막 분기 다음 n개 분기 라벨 만들기 (25Q1 형식)."""
     try:
         ts = pd.Timestamp(last_col)
     except (TypeError, ValueError):
@@ -457,20 +551,30 @@ def _next_quarter_labels(last_col, n: int = 2) -> list[str]:
     labels = []
     for i in range(1, n + 1):
         next_ts = ts + pd.DateOffset(months=3 * i)
-        labels.append(f"{next_ts.year}.{next_ts.month:02d}")
+        year_short = next_ts.year % 100
+        quarter = (next_ts.month - 1) // 3 + 1
+        labels.append(f"{quarter}Q{year_short:02d}")
     return labels
 
 
 def _calc_yoy_for_future_eps(period_label: str, eps: float,
                               history_eps_series: pd.Series) -> Optional[float]:
     """미래 분기 EPS의 YoY (1년 전 실제 분기와 비교)."""
+    # 라벨 파싱: '1Q25' → quarter=1, year=2025
+    import re as _re
+    m = _re.match(r"^(\d)Q(\d{2})$", period_label)
+    if not m:
+        return None
+    quarter = int(m.group(1))
+    year = 2000 + int(m.group(2))
+    # 분기 → 마지막 월 (3, 6, 9, 12)
+    target_month = quarter * 3
     try:
-        year, month = period_label.split(".")
-        target_ts = pd.Timestamp(f"{int(year) - 1}-{int(month):02d}-01") + pd.offsets.MonthEnd(0)
+        target_ts = pd.Timestamp(f"{year - 1}-{target_month:02d}-15")
     except (ValueError, TypeError):
         return None
 
-    tolerance = pd.Timedelta(days=45)
+    tolerance = pd.Timedelta(days=60)
     closest = None
     closest_diff = tolerance
     for c in history_eps_series.index:
@@ -516,75 +620,117 @@ def _calc_yoy_for_future_revenue_annual(year: int, revenue: float,
 
 
 # ============================================================
-# Naver 데이터에서 특정 기간 값 추출 (단순화: 일단 None 반환)
+# Naver 데이터에서 특정 기간 값 추출
+# 새 네이버 파서 (v2)의 표준 형식: 행=영문 표준명, 열=Timestamp
 # ============================================================
-def _get_naver_quarterly_eps(naver_data: dict, period_label: str) -> Optional[float]:
-    """네이버 데이터에서 특정 분기의 EPS 추출. 현재는 단순 매칭."""
-    if naver_data is None:
+def _label_to_naver_ts(period_label: str, is_quarterly: bool = True) -> Optional[pd.Timestamp]:
+    """
+    우리 라벨('3Q25', 'FY25') → 네이버 Timestamp 형식 변환.
+    """
+    import re as _re
+    if is_quarterly:
+        m = _re.match(r"^(\d)Q(\d{2})$", period_label)
+        if not m:
+            return None
+        quarter = int(m.group(1))
+        year = 2000 + int(m.group(2))
+        month = quarter * 3
+        last_day = 31 if month in (3, 12) else 30
+        try:
+            return pd.Timestamp(f"{year}-{month:02d}-{last_day:02d}")
+        except (ValueError, TypeError):
+            return None
+    else:
+        # 연간: 'FY25' → 2025-12-31
+        m = _re.match(r"^FY(\d{2})$", period_label)
+        if not m:
+            return None
+        year = 2000 + int(m.group(1))
+        try:
+            return pd.Timestamp(f"{year}-12-31")
+        except (ValueError, TypeError):
+            return None
+
+
+def _naver_lookup(df: pd.DataFrame, row_name: str, target_ts: pd.Timestamp,
+                  tolerance_days: int = 45) -> Optional[float]:
+    """네이버 DataFrame에서 row × 가장 가까운 컬럼 찾기."""
+    if df is None or df.empty:
         return None
-    df = naver_data.get("quarterly", pd.DataFrame())
-    if df.empty:
+    if row_name not in df.index:
         return None
 
-    # 행 이름이 'EPS(원)' 또는 'EPS' 같은 패턴
-    for idx in df.index:
-        if "EPS" in str(idx):
-            # 컬럼명에서 매칭 (period_label과 동일하거나 '(E)' 포함)
-            for col in df.columns:
-                col_str = str(col).replace("(E)", "").replace("(P)", "").strip()
-                if col_str == period_label:
-                    val = df.at[idx, col]
-                    if pd.notna(val):
-                        return float(val)
-    return None
+    tolerance = pd.Timedelta(days=tolerance_days)
+    best_col = None
+    best_diff = tolerance
+    for col in df.columns:
+        try:
+            col_ts = pd.Timestamp(col)
+        except (TypeError, ValueError):
+            continue
+        diff = abs(col_ts - target_ts)
+        if diff <= best_diff:
+            best_col = col
+            best_diff = diff
+
+    if best_col is None:
+        return None
+
+    val = df.at[row_name, best_col]
+    if pd.isna(val):
+        return None
+    return float(val)
+
+
+def _get_naver_quarterly_eps(naver_data: dict, period_label: str) -> Optional[float]:
+    """네이버에서 특정 분기 EPS 추출 (예: '3Q25' → 71,049 원)."""
+    if naver_data is None:
+        return None
+    target_ts = _label_to_naver_ts(period_label, is_quarterly=True)
+    if target_ts is None:
+        return None
+    return _naver_lookup(naver_data.get("quarterly", pd.DataFrame()),
+                         "EPS Naver", target_ts)
 
 
 def _get_naver_quarterly_revenue(naver_data: dict, period_label: str) -> Optional[float]:
+    """네이버에서 특정 분기 매출 추출 (이미 원 단위로 변환됨)."""
     if naver_data is None:
         return None
-    df = naver_data.get("quarterly", pd.DataFrame())
-    if df.empty:
+    target_ts = _label_to_naver_ts(period_label, is_quarterly=True)
+    if target_ts is None:
         return None
-    for idx in df.index:
-        if "매출" in str(idx):
-            for col in df.columns:
-                col_str = str(col).replace("(E)", "").replace("(P)", "").strip()
-                if col_str == period_label:
-                    val = df.at[idx, col]
-                    if pd.notna(val):
-                        return float(val) * 100_000_000  # 억원 → 원
-    return None
+    return _naver_lookup(naver_data.get("quarterly", pd.DataFrame()),
+                         "Total Revenue", target_ts)
 
 
 def _get_naver_annual_eps(naver_data: dict, period_label: str) -> Optional[float]:
+    """네이버에서 특정 연도 EPS 추출 (예: 'FY26' → 138,478 원)."""
     if naver_data is None:
         return None
-    df = naver_data.get("annual", pd.DataFrame())
-    if df.empty:
+    target_ts = _label_to_naver_ts(period_label, is_quarterly=False)
+    if target_ts is None:
         return None
-    for idx in df.index:
-        if "EPS" in str(idx):
-            for col in df.columns:
-                col_str = str(col).replace("(E)", "").replace("(P)", "").strip()
-                if col_str == period_label:
-                    val = df.at[idx, col]
-                    if pd.notna(val):
-                        return float(val)
-    return None
+    return _naver_lookup(naver_data.get("annual", pd.DataFrame()),
+                         "EPS Naver", target_ts)
 
 
 def _get_naver_annual_revenue(naver_data: dict, period_label: str) -> Optional[float]:
     if naver_data is None:
         return None
-    df = naver_data.get("annual", pd.DataFrame())
-    if df.empty:
+    target_ts = _label_to_naver_ts(period_label, is_quarterly=False)
+    if target_ts is None:
         return None
-    for idx in df.index:
-        if "매출" in str(idx):
-            for col in df.columns:
-                col_str = str(col).replace("(E)", "").replace("(P)", "").strip()
-                if col_str == period_label:
-                    val = df.at[idx, col]
-                    if pd.notna(val):
-                        return float(val) * 100_000_000
-    return None
+    return _naver_lookup(naver_data.get("annual", pd.DataFrame()),
+                         "Total Revenue", target_ts)
+
+
+def _get_naver_annual_roe(naver_data: dict, period_label: str) -> Optional[float]:
+    """네이버에서 특정 연도 ROE(지배주주) 추출. 단위는 % (그대로 반환, 호출자가 /100)."""
+    if naver_data is None:
+        return None
+    target_ts = _label_to_naver_ts(period_label, is_quarterly=False)
+    if target_ts is None:
+        return None
+    return _naver_lookup(naver_data.get("annual", pd.DataFrame()),
+                         "ROE", target_ts)

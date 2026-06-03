@@ -1,0 +1,27 @@
+# Streamlit 테마 — 시니어 펀드매니저 도구
+# Bloomberg/FactSet 스타일 다크 모드 + Inter 폰트 + 가독성 강화
+
+[theme]
+base = "dark"
+
+# 강조색 (선택/링크/액센트)
+primaryColor = "#3b82f6"
+
+# 배경 (더 깊은 검정)
+backgroundColor = "#0a0a0a"
+secondaryBackgroundColor = "#141414"
+
+# 본문 텍스트 (밝은 회색)
+textColor = "#d4d4d8"
+
+# 폰트 — sans-serif 우선 (본문/헤더), 숫자는 코드에서 mono로 처리
+font = "sans serif"
+
+
+[server]
+headless = false
+runOnSave = true
+
+
+[browser]
+gatherUsageStats = false
