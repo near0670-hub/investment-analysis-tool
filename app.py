@@ -1138,7 +1138,11 @@ def render_valuation_tab(data: dict, user_inputs: dict):
     )
     m = result["metrics"]
 
-    st.markdown("### Valuation Multiples")
+    # ========== Valuation Multiples 카드 (full-width) ==========
+    st.markdown(section_card_open(
+        "VALUATION MULTIPLES",
+        subtitle="Current snapshot — see time series below for historical context"
+    ), unsafe_allow_html=True)
     cols = st.columns(4)
     cols[0].metric("P/E (TTM)", display_value(m["per_ttm"], format_multiple))
     cols[1].metric("Fwd P/E (NTM)", display_value(m["forward_per_1y"], format_multiple))
@@ -1150,10 +1154,13 @@ def render_valuation_tab(data: dict, user_inputs: dict):
     cols[1].metric("EV/EBITDA", display_value(m["ev_ebitda"], format_multiple))
     cols[2].metric("ROE (TTM)", display_value(m["roe_ttm"], format_pct))
     cols[3].metric("Cost of Equity", format_pct(m.get("coe_assumed", 0.10)))
+    st.markdown(section_card_close(), unsafe_allow_html=True)
 
-    # PEG triple
-    st.markdown("### PEG — Primary Valuation Signal")
-    st.caption("Three variants. Forward 2Y is the most stable (smooths one-off effects).")
+    # ========== PEG — Primary Valuation Signal ==========
+    st.markdown(section_card_open(
+        "PEG — PRIMARY VALUATION SIGNAL",
+        subtitle="Three variants. Forward 2Y is the most stable (smooths one-off effects)."
+    ), unsafe_allow_html=True)
 
     pegs = [
         ("PEG (TTM)", "Trailing 2Y EPS CAGR", m["peg_ttm"]),
@@ -1174,9 +1181,26 @@ def render_valuation_tab(data: dict, user_inputs: dict):
         st.markdown(f"`EPS (TTM)        {display_value(inputs.get('eps_ttm'), lambda v: format_number(v, 3))}`")
         st.markdown(f"`Fwd EPS (NTM)    {display_value(inputs.get('forward_eps_1y'), lambda v: format_number(v, 3))}  source: {inputs.get('forward_eps_1y_source') or 'N/A'}`")
         st.markdown(f"`Fwd EPS (2Y)     {display_value(inputs.get('forward_eps_2y'), lambda v: format_number(v, 3))}  source: {inputs.get('forward_eps_2y_source') or 'N/A'}`")
+    st.markdown(section_card_close(), unsafe_allow_html=True)
 
-    # Trap Detection
-    st.markdown("### Trap Detection")
+    # ========== Phase 3: Valuation Time Series 카드 ==========
+    from modules.valuation_timeseries import calculate_valuation_timeseries
+    val_ts = calculate_valuation_timeseries(data, n_history=4)
+
+    st.markdown(section_card_open(
+        "VALUATION TIME SERIES",
+        subtitle="Historical PER/PBR + consensus — automated signal classification"
+    ), unsafe_allow_html=True)
+
+    if val_ts is None:
+        st.markdown(badge("N/A", "na") + " &nbsp; Insufficient data for valuation time series",
+                    unsafe_allow_html=True)
+    else:
+        _render_valuation_timeseries(val_ts)
+    st.markdown(section_card_close(), unsafe_allow_html=True)
+
+    # ========== Trap Detection 카드 ==========
+    st.markdown(section_card_open("TRAP DETECTION"), unsafe_allow_html=True)
     if not result["flags"]:
         st.markdown(badge("CLEAR", "positive") + " &nbsp; No valuation traps detected.", unsafe_allow_html=True)
     else:
@@ -1184,6 +1208,228 @@ def render_valuation_tab(data: dict, user_inputs: dict):
             variant = {"warning": "warning", "good": "positive", "info": "neutral"}.get(f["severity"], "neutral")
             label = {"warning": "RISK", "good": "STRENGTH", "info": "NOTE"}.get(f["severity"], "NOTE")
             render_signal_line(label, _translate_flag_msg(f["msg"]), variant)
+    st.markdown(section_card_close(), unsafe_allow_html=True)
+
+
+def _render_valuation_timeseries(result: dict):
+    """
+    Valuation 시계열 렌더링 (PER/PBR/배당수익률).
+    듀퐁 분해와 동일한 스타일 (시계열 카드 + 자동 해설 + 임계값 투명).
+    """
+    components = result["components"]
+    avg = result["avg_metrics"]
+    country = result["country"]
+    source_note = result["source_note"]
+    narrative = result["narrative"]
+    signals = result["signals"]
+    evidence = result["evidence"]
+    thresholds = result["thresholds"]
+    current = result.get("current")
+
+    # ----- 1) Source note -----
+    st.markdown(
+        f'<div style="color:#71717a; font-size:0.78rem; margin-bottom:12px;">'
+        f'{source_note}</div>',
+        unsafe_allow_html=True
+    )
+
+    # ----- 2) 시그널 배지 (메인 결론) -----
+    if signals:
+        primary = signals[0]
+        # 큰 배지 + 설명
+        st.markdown(
+            f'<div style="margin-bottom:14px;">'
+            f'<span class="badge badge-{primary["variant"]}" style="font-size:0.85rem; padding:5px 12px;">'
+            f'{primary["label"]}'
+            f'</span>'
+            f' &nbsp; <span style="color:#d4d4d8; font-size:0.92rem;">'
+            f'{primary["description"]}'
+            f'</span>'
+            f'</div>',
+            unsafe_allow_html=True
+        )
+
+    # ----- 3) PER 시계열 카드들 -----
+    if country == "KR" and len(components) >= 2:
+        n_periods = len(components)
+        per_cols = st.columns(n_periods)
+
+        for i, (_, row) in enumerate(components.iterrows()):
+            period = row["period"]
+            is_consensus = row.get("is_consensus", False)
+            per_val = row.get("per")
+
+            period_color = "#fbbf24" if is_consensus else "#a1a1aa"
+            period_label = period + " (E)" if is_consensus else period
+            val_color = "#fbbf24" if is_consensus else "#ffffff"
+            val_str = f"{per_val:.1f}x" if per_val is not None else "—"
+
+            # 평균 대비 델타 (actual만)
+            delta_html = ""
+            if not is_consensus and per_val is not None and avg.get("per_avg"):
+                delta = (per_val / avg["per_avg"]) - 1
+                if abs(delta) >= 0.05:
+                    color = "#ef4444" if delta > 0.20 else ("#22c55e" if delta < -0.15 else "#71717a")
+                    arrow = "▲" if delta > 0 else "▼"
+                    delta_html = (f'<div style="margin-top:5px; color:{color}; '
+                                  f'font-size:0.7rem; font-family:\'IBM Plex Mono\',monospace;">'
+                                  f'{arrow} {delta*100:+.1f}% vs avg</div>')
+
+            with per_cols[i]:
+                st.markdown(
+                    f'<div style="text-align:center; padding:14px 8px; '
+                    f'background:#0f0f0f; border:1px solid #262626; '
+                    f'border-radius:4px;">'
+                    f'<div style="color:{period_color}; font-size:0.7rem; '
+                    f'margin-bottom:6px; text-transform:uppercase; '
+                    f'letter-spacing:0.6px; font-weight:600;">{period_label}</div>'
+                    f'<div style="color:{val_color}; font-size:1.5rem; '
+                    f'font-weight:600; font-family:\'IBM Plex Mono\',monospace; '
+                    f'letter-spacing:-0.5px;">'
+                    f'{val_str}</div>'
+                    f'{delta_html}'
+                    f'</div>',
+                    unsafe_allow_html=True
+                )
+
+    # ----- 4) 시계열 테이블 (PER / PBR / Dividend Yield) -----
+    st.markdown(
+        '<div style="margin-top:18px; color:#a1a1aa; font-size:0.82rem;">'
+        '<b style="color:#ffffff;">Multi-period Valuation Metrics</b>'
+        '</div>',
+        unsafe_allow_html=True
+    )
+
+    # 테이블 HTML
+    html = ['<table style="width:100%; border-collapse:collapse; font-size:0.85rem; margin-top:8px;">']
+    html.append('<thead><tr style="border-bottom:1px solid #404040;">')
+    html.append('<th style="text-align:left; padding:10px 8px; color:#71717a; '
+                'font-weight:600; font-size:0.72rem; text-transform:uppercase; '
+                'letter-spacing:0.5px;">Metric</th>')
+    for _, row in components.iterrows():
+        period = row["period"]
+        is_c = row.get("is_consensus", False)
+        color = "#fbbf24" if is_c else "#d4d4d8"
+        label = period + " (E)" if is_c else period
+        html.append(f'<th style="text-align:right; padding:10px 8px; color:{color}; '
+                    f'font-weight:600; font-size:0.72rem; text-transform:uppercase; '
+                    f'letter-spacing:0.5px;">{label}</th>')
+
+    # 평균 컬럼
+    if country == "KR":
+        html.append('<th style="text-align:right; padding:10px 8px; color:#3b82f6; '
+                    'font-weight:700; font-size:0.72rem; text-transform:uppercase; '
+                    'letter-spacing:0.5px;">5Y AVG</th>')
+    html.append('</tr></thead><tbody>')
+
+    # 행: PER, PBR, Dividend Yield
+    metric_rows = [
+        ("PER", "per", "x", avg.get("per_avg")),
+        ("PBR", "pbr", "x", avg.get("pbr_avg")),
+        ("Dividend Yield", "dividend_yield", "%", avg.get("div_yield_avg")),
+    ]
+
+    for metric_label, metric_key, unit, avg_val in metric_rows:
+        # 데이터가 하나도 없으면 행 자체를 스킵
+        all_vals = [row.get(metric_key) for _, row in components.iterrows()]
+        if all(v is None or pd.isna(v) for v in all_vals):
+            continue
+
+        html.append('<tr style="border-bottom:1px solid #1f1f1f;">')
+        html.append(
+            f'<td style="padding:11px 8px;">'
+            f'<div style="color:#ffffff; font-weight:600; font-size:0.9rem;">'
+            f'{metric_label}</div>'
+            f'</td>'
+        )
+
+        for _, row in components.iterrows():
+            val = row.get(metric_key)
+            is_c = row.get("is_consensus", False)
+
+            if val is None or pd.isna(val):
+                cell = '<span style="color:#52525b;">—</span>'
+            else:
+                if unit == "%":
+                    val_str = f"{val*100:.2f}%"
+                else:
+                    val_str = f"{val:.2f}x"
+                cell_color = "#fbbf24" if is_c else "#ffffff"
+                cell = (f'<div style="color:{cell_color}; font-weight:500; '
+                        f'font-family:\'IBM Plex Mono\',monospace; font-size:0.95rem;">'
+                        f'{val_str}</div>')
+
+            html.append(f'<td style="padding:11px 8px; text-align:right;">{cell}</td>')
+
+        # 평균 셀
+        if country == "KR":
+            if avg_val is None:
+                avg_str = "—"
+            elif unit == "%":
+                avg_str = f"{avg_val*100:.2f}%"
+            else:
+                avg_str = f"{avg_val:.2f}x"
+            html.append(
+                f'<td style="padding:11px 8px; text-align:right;">'
+                f'<div style="color:#60a5fa; font-weight:500; '
+                f'font-family:\'IBM Plex Mono\',monospace; font-size:0.95rem;">'
+                f'{avg_str}</div>'
+                f'</td>'
+            )
+        html.append('</tr>')
+
+    html.append('</tbody></table>')
+    st.markdown("".join(html), unsafe_allow_html=True)
+
+    # ----- 5) 자동 해설 + 근거 박스 -----
+    if narrative:
+        # 시그널 색상에 맞춰 박스 색상
+        variant_colors = {
+            "positive": ("#22c55e", "rgba(34,197,94,0.08)"),
+            "negative": ("#ef4444", "rgba(239,68,68,0.08)"),
+            "warning":  ("#fbbf24", "rgba(251,191,36,0.08)"),
+            "neutral":  ("#60a5fa", "rgba(96,165,250,0.08)"),
+        }
+        primary_variant = signals[0]["variant"] if signals else "neutral"
+        color, bg = variant_colors.get(primary_variant, variant_colors["neutral"])
+
+        evidence_html = ""
+        if evidence:
+            evidence_html = '<div style="margin-top:10px; padding-top:10px; ' \
+                            'border-top:1px solid #262626; color:#a1a1aa; ' \
+                            'font-size:0.78rem; line-height:1.6;">'
+            evidence_html += '<div style="color:#71717a; font-weight:600; ' \
+                             'margin-bottom:4px; font-size:0.7rem; letter-spacing:0.5px;">EVIDENCE</div>'
+            for e in evidence:
+                evidence_html += f'<div style="margin:3px 0;">→ {e}</div>'
+            evidence_html += '</div>'
+
+        st.markdown(
+            f'<div style="margin-top:18px; padding:14px 16px; '
+            f'background:{bg}; border-left:3px solid {color}; '
+            f'border-radius:4px; font-size:0.88rem; color:#ffffff; line-height:1.6;">'
+            f'<div style="color:{color}; font-size:0.72rem; font-weight:700; '
+            f'margin-bottom:6px; letter-spacing:0.6px;">INSIGHT</div>'
+            f'{narrative}'
+            f'{evidence_html}'
+            f'</div>',
+            unsafe_allow_html=True
+        )
+
+    # ----- 6) 임계값 노출 (투명성) -----
+    with st.expander("Signal thresholds (transparency)"):
+        threshold_descriptions = {
+            "discount_factor": f"DISCOUNT: PER < 5Y avg × {thresholds['discount_factor']} ({(thresholds['discount_factor']-1)*100:.0f}%)",
+            "premium_factor": f"PREMIUM: PER > 5Y avg × {thresholds['premium_factor']} (+{(thresholds['premium_factor']-1)*100:.0f}%)",
+            "rerating_growth_min": f"RE-RATING: PER < avg × 0.85 + consensus growth > {thresholds['rerating_growth_min']*100:.0f}%",
+            "value_trap_revenue_min": f"VALUE TRAP: PER < avg × 0.85 + revenue YoY < {thresholds['value_trap_revenue_min']*100:.0f}%",
+            "mean_reversion_band": f"NEAR MEAN: |current - avg| < avg × {thresholds['mean_reversion_band']} (±{thresholds['mean_reversion_band']*100:.0f}%)",
+            "cyclical_peak_margin": f"CYCLICAL PEAK: PER near 5Y min + margin > peak × {thresholds['cyclical_peak_margin']}",
+        }
+        for key, desc in threshold_descriptions.items():
+            st.markdown(f'<div style="font-family:\'IBM Plex Mono\',monospace; '
+                        f'font-size:0.78rem; color:#a1a1aa; margin:4px 0;">'
+                        f'{desc}</div>', unsafe_allow_html=True)
 
 
 def _build_dynamic_caption(past_n: int, future_n: int, period_unit: str,
