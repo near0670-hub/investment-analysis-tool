@@ -25,6 +25,7 @@ from modules.growth_analysis import analyze_growth
 from modules.profitability_analysis import analyze_profitability
 from modules.valuation_analysis import analyze_valuation
 from modules.sector_classifier import get_sector_display_name
+from modules.stability_analysis import render_tab as render_stability_tab
 from utils.formatting import (
     format_currency, format_pct, format_multiple, format_yoy, format_number,
 )
@@ -1902,8 +1903,8 @@ def main():
     st.markdown("")
 
     # Tabs
-    tab_summary, tab_growth, tab_profit, tab_val = st.tabs(
-        ["SUMMARY", "GROWTH", "PROFITABILITY", "VALUATION"]
+    tab_summary, tab_growth, tab_profit, tab_stab, tab_val = st.tabs(
+        ["SUMMARY", "GROWTH", "PROFITABILITY", "STABILITY", "VALUATION"]
     )
 
     with tab_summary:
@@ -1912,6 +1913,8 @@ def main():
         render_growth_tab(data, user_inputs)
     with tab_profit:
         render_profitability_tab(data)
+    with tab_stab:
+        render_stability_tab(data)
     with tab_val:
         render_valuation_tab(data, user_inputs)
 
