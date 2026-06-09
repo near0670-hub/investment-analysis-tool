@@ -840,7 +840,7 @@ def render_growth_tab(data: dict, user_inputs: dict):
                 unsafe_allow_html=True)
     if not quarterly_df.empty:
         # 좌우 컬럼: 좌측 테이블, 우측 차트 2개 세로
-        q_left, q_right = st.columns([1.3, 1])
+        q_left, q_right = st.columns([1, 1])
         with q_left:
             _render_timeseries_table(quarterly_df, currency=data["meta"].get("currency", "USD"),
                                      is_annual=False)
@@ -849,6 +849,7 @@ def render_growth_tab(data: dict, user_inputs: dict):
                 render_yoy_bar_chart(quarterly_df, "revenue_yoy", "Revenue YoY", height=200),
                 use_container_width=True,
             )
+            st.markdown('<div style="height:18px"></div>', unsafe_allow_html=True)
             st.plotly_chart(
                 render_yoy_bar_chart(quarterly_df, "eps_yoy", "EPS YoY", height=200),
                 use_container_width=True,
@@ -869,7 +870,7 @@ def render_growth_tab(data: dict, user_inputs: dict):
     st.markdown(section_card_open("ANNUAL PERFORMANCE", subtitle=a_caption),
                 unsafe_allow_html=True)
     if not annual_df.empty:
-        a_left, a_right = st.columns([1.3, 1])
+        a_left, a_right = st.columns([1, 1])
         with a_left:
             _render_timeseries_table(annual_df, currency=data["meta"].get("currency", "USD"),
                                      is_annual=True)
@@ -878,6 +879,7 @@ def render_growth_tab(data: dict, user_inputs: dict):
                 render_yoy_bar_chart(annual_df, "revenue_yoy", "Revenue YoY", height=200),
                 use_container_width=True,
             )
+            st.markdown('<div style="height:18px"></div>', unsafe_allow_html=True)
             st.plotly_chart(
                 render_yoy_bar_chart(annual_df, "eps_yoy", "EPS YoY", height=200),
                 use_container_width=True,
