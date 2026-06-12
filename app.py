@@ -846,12 +846,12 @@ def render_growth_tab(data: dict, user_inputs: dict):
                                      is_annual=False)
         with q_right:
             st.plotly_chart(
-                render_yoy_bar_chart(quarterly_df, "revenue_yoy", "Revenue YoY", height=200),
+                render_yoy_bar_chart(quarterly_df, "revenue_yoy", "Revenue YoY", height=150),
                 use_container_width=True,
             )
             st.markdown('<div style="height:18px"></div>', unsafe_allow_html=True)
             st.plotly_chart(
-                render_yoy_bar_chart(quarterly_df, "eps_yoy", "EPS YoY", height=200),
+                render_yoy_bar_chart(quarterly_df, "eps_yoy", "EPS YoY", height=150),
                 use_container_width=True,
             )
     else:
@@ -876,12 +876,12 @@ def render_growth_tab(data: dict, user_inputs: dict):
                                      is_annual=True)
         with a_right:
             st.plotly_chart(
-                render_yoy_bar_chart(annual_df, "revenue_yoy", "Revenue YoY", height=200),
+                render_yoy_bar_chart(annual_df, "revenue_yoy", "Revenue YoY", height=150),
                 use_container_width=True,
             )
             st.markdown('<div style="height:18px"></div>', unsafe_allow_html=True)
             st.plotly_chart(
-                render_yoy_bar_chart(annual_df, "eps_yoy", "EPS YoY", height=200),
+                render_yoy_bar_chart(annual_df, "eps_yoy", "EPS YoY", height=150),
                 use_container_width=True,
             )
     else:

@@ -115,6 +115,14 @@ def render_yoy_bar_chart(
         bargap=0.35,
     )
 
+    # yaxis padding for outside text labels (prevents label clipping at small heights)
+    _y_vals = [v * 100 if (v is not None and not pd.isna(v)) else 0 for v in df[metric_column]]
+    if _y_vals:
+        _y_max = max(_y_vals + [0])
+        _y_min = min(_y_vals + [0])
+        _span = max(_y_max - _y_min, 1)
+        fig.update_layout(yaxis=dict(range=[_y_min - _span * 0.15, _y_max + _span * 0.30]))
+
     return fig
 
 
