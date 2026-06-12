@@ -34,6 +34,8 @@ from utils.formatting import (
 # ============================================================
 # Page config
 # ============================================================
+_startup_errors = []
+
 st.set_page_config(
     page_title="Equity Research Terminal",
     page_icon="◼",
@@ -45,6 +47,11 @@ st.set_page_config(
 # ============================================================
 # Custom CSS — Bloomberg Terminal-inspired styling
 # ============================================================
+if _startup_errors:
+    for _e in _startup_errors:
+        st.error(_e)
+    st.stop()
+
 st.markdown("""
 <!-- Font import: Inter (본문/헤더), IBM Plex Mono (숫자/테이블), Material Symbols (아이콘) -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
