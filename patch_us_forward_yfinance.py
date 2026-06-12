@@ -1,53 +1,34 @@
 """
-modules/data_sources/yfinance_source.py — yfinance 전담 소스
+patch_us_forward_yfinance.py — Phase 4.5: 미국 forward consensus 1단계.
 
-미국 종목의 모든 데이터 + 한국 종목의 기본 정보(가격, 시총, 섹터).
+modules/data_sources/yfinance_source.py에 fetch_us_forward_consensus() 함수 추가.
+
+실행:
+    python patch_us_forward_yfinance.py
+
+추가 후 본인 확인 명령:
+    python -c "from modules.data_sources.yfinance_source import fetch_us_forward_consensus; \
+import json; print(json.dumps(fetch_us_forward_consensus('AAPL', verbose=True), default=str, indent=2))"
+
+안전장치:
+    - 백업 자동 생성 (yfinance_source.py.bak.us_forward)
+    - 이미 패치되어 있으면 skip (멱등성)
 """
 
 from __future__ import annotations
 
-from typing import Optional
+import shutil
+import sys
+from pathlib import Path
 
-import pandas as pd
-import yfinance as yf
+SRC = Path("modules/data_sources/yfinance_source.py")
+BACKUP = Path("modules/data_sources/yfinance_source.py.bak.us_forward")
 
 
-def fetch_yfinance(ticker: str, verbose: bool = False) -> dict:
-    """
-    yfinance로 원시 데이터 수집.
-
-    Returns:
-        dict: yfinance 원시 데이터 (정규화 전)
-              data_loader.py가 이걸 표준 스키마로 변환
-    """
-    yf_ticker = yf.Ticker(ticker)
-
-    def _safe_attr(name: str, default=None, call: bool = False, **kwargs):
-        try:
-            attr = getattr(yf_ticker, name)
-            if call:
-                return attr(**kwargs)
-            return attr
-        except Exception as e:
-            if verbose:
-                print(f"  [WARN] yfinance.{name} failed for {ticker}: {e}")
-            return default
-
-    return {
-        "info":               _safe_attr("info", {}) or {},
-        "price":              _safe_attr("history", pd.DataFrame(), call=True, period="5y"),
-        "income_quarterly":   _safe_attr("quarterly_financials", pd.DataFrame()),
-        "income_annual":      _safe_attr("financials", pd.DataFrame()),
-        "balance_quarterly":  _safe_attr("quarterly_balance_sheet", pd.DataFrame()),
-        "balance_annual":     _safe_attr("balance_sheet", pd.DataFrame()),
-        "cashflow_quarterly": _safe_attr("quarterly_cashflow", pd.DataFrame()),
-        "cashflow_annual":    _safe_attr("cashflow", pd.DataFrame()),
-        "earnings_dates":     _safe_attr("earnings_dates", None),
-        "earnings_history":   _safe_attr("earnings_history", pd.DataFrame()),  # 분기 EPS 8개 확장용
-        "dividends":          _safe_attr("dividends", pd.Series(dtype=float)),
-        "recommendations":    _safe_attr("recommendations", None),
-    }
-
+# ============================================================
+# 추가할 함수 (yfinance_source.py 끝에 append)
+# ============================================================
+NEW_FUNCTION = '''
 
 def fetch_us_forward_consensus(ticker: str, verbose: bool = False) -> dict:
     """
@@ -218,49 +199,38 @@ def fetch_us_forward_consensus(ticker: str, verbose: bool = False) -> dict:
         "quarterly_forward": quarterly_forward,
         "annual_forward":    annual_forward,
     }
+'''
 
 
-def to_consensus_format(us_consensus: dict) -> dict:
-    """
-    fetch_us_forward_consensus() 결과를 naver_source 호환 형식으로 변환.
+def main() -> int:
+    if not SRC.exists():
+        print(f"✗ {SRC} 없음.")
+        print("  investment_analysis_tool/ 디렉토리에서 실행하세요.")
+        return 1
 
-    naver_source 형식:
-        {
-            "quarterly": pd.DataFrame(
-                index=["Total Revenue", "EPS Naver"],
-                columns=[pd.Timestamp(...), ...]  # 분기말 날짜
-            ),
-            "annual": pd.DataFrame(...)
-        }
+    text = SRC.read_text()
 
-    이 형식으로 변환하면 modules/timeseries.py의 _get_naver_quarterly_eps/
-    _get_naver_annual_eps 등 헬퍼가 그대로 동작 (변경 0).
+    if "def fetch_us_forward_consensus" in text:
+        print("✓ 이미 패치됨 — 함수 fetch_us_forward_consensus 존재")
+        return 0
 
-    Args:
-        us_consensus: fetch_us_forward_consensus() 반환 dict
+    if not BACKUP.exists():
+        shutil.copy(SRC, BACKUP)
+        print(f"✓ 백업 생성: {BACKUP}")
 
-    Returns:
-        {"quarterly": DataFrame, "annual": DataFrame}
-        빈 입력 → 빈 DataFrame 두 개.
-    """
-    def _build_df(items: list) -> pd.DataFrame:
-        if not items:
-            return pd.DataFrame()
-        cols = {}
-        for item in items:
-            try:
-                ts = pd.Timestamp(item["period_end"])
-            except (TypeError, ValueError, KeyError):
-                continue
-            cols[ts] = {
-                "Total Revenue": item.get("revenue_est"),
-                "EPS Naver":     item.get("eps_est"),
-            }
-        if not cols:
-            return pd.DataFrame()
-        return pd.DataFrame(cols)  # columns=timestamps, index=row names
+    # 파일 끝에 새 함수 append
+    if not text.endswith("\n"):
+        text += "\n"
+    text += NEW_FUNCTION
 
-    return {
-        "quarterly": _build_df(us_consensus.get("quarterly_forward", [])),
-        "annual":    _build_df(us_consensus.get("annual_forward",    [])),
-    }
+    SRC.write_text(text)
+    print(f"✓ {SRC}에 fetch_us_forward_consensus() 추가됨")
+    print()
+    print("동작 확인 명령:")
+    print('  python -c "from modules.data_sources.yfinance_source import fetch_us_forward_consensus; \\')
+    print('import json; print(json.dumps(fetch_us_forward_consensus(\'AAPL\', verbose=True), default=str, indent=2))"')
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

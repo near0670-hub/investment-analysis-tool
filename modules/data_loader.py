@@ -473,6 +473,32 @@ def load_company_data(
             if verbose:
                 print(f"  [naver error, gracefully skipped] {e}")
 
+    else:
+        # ============================================================
+        # 미국 종목: yfinance forward consensus
+        # ⚠️ 실패해도 앱 안 죽음 (graceful degradation)
+        # naver_data 변수에 동일 형식으로 저장 → timeseries.py 재사용
+        # ============================================================
+        try:
+            from modules.data_sources.yfinance_source import (
+                fetch_us_forward_consensus, to_consensus_format,
+            )
+            us_consensus = fetch_us_forward_consensus(ticker, verbose=verbose)
+            naver_data = to_consensus_format(us_consensus)
+            # 빈 결과면 None (timeseries.py가 None 체크함)
+            if naver_data["quarterly"].empty and naver_data["annual"].empty:
+                naver_data = None
+            else:
+                sources_used.append("yf_consensus")
+                if verbose:
+                    print(f"  [yf_consensus] "
+                          f"{len(us_consensus.get('quarterly_forward', []))}q, "
+                          f"{len(us_consensus.get('annual_forward', []))}y")
+        except Exception as e:
+            naver_data = None
+            if verbose:
+                print(f"  [yf_consensus error, gracefully skipped] {e}")
+
     # ============================================================
     # 5. 재무제표 병합 (한국 종목은 DART 우선)
     # ============================================================
